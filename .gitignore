@@ -1,0 +1,12 @@
+# Build artifacts
+*.exe
+*.exe~
+*.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local Claude Code config
+.claude/settings.local.json
