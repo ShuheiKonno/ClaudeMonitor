@@ -21,8 +21,6 @@ type Config struct {
 
 	TokenLimit5h int64 `json:"tokenLimit5h"`
 	TokenLimit7d int64 `json:"tokenLimit7d"`
-	MsgLimit5h   int64 `json:"msgLimit5h"`
-	MsgLimit7d   int64 `json:"msgLimit7d"`
 }
 
 var (

@@ -18,8 +18,6 @@ type settingsPayload struct {
 	Plan         string `json:"plan"`
 	TokenLimit5h int64  `json:"tokenLimit5h"`
 	TokenLimit7d int64  `json:"tokenLimit7d"`
-	MsgLimit5h   int64  `json:"msgLimit5h"`
-	MsgLimit7d   int64  `json:"msgLimit7d"`
 	Topmost      bool   `json:"topmost"`
 	Transparent  bool   `json:"transparent"`
 }
@@ -47,8 +45,6 @@ func startServer() (int, error) {
 			Plan:         cfg.Plan,
 			TokenLimit5h: cfg.TokenLimit5h,
 			TokenLimit7d: cfg.TokenLimit7d,
-			MsgLimit5h:   cfg.MsgLimit5h,
-			MsgLimit7d:   cfg.MsgLimit7d,
 			Topmost:      cfg.Topmost,
 			Transparent:  cfg.Transparent,
 		})
@@ -66,8 +62,6 @@ func startServer() (int, error) {
 			}
 			c.TokenLimit5h = p.TokenLimit5h
 			c.TokenLimit7d = p.TokenLimit7d
-			c.MsgLimit5h = p.MsgLimit5h
-			c.MsgLimit7d = p.MsgLimit7d
 			c.Topmost = p.Topmost
 			c.Transparent = p.Transparent
 		})

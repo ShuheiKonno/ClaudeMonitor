@@ -62,10 +62,10 @@ func getHTML() string {
 
   .content {
     flex: 1;
-    padding: 10px;
+    padding: 8px 10px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     overflow: hidden;
   }
 
@@ -73,31 +73,19 @@ func getHTML() string {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 8px 10px;
+    padding: 6px 10px;
+  }
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .section-title {
     font-size: 10px;
     font-weight: 600;
     color: var(--fg-dim);
     letter-spacing: 0.05em;
-    margin-bottom: 6px;
-  }
-
-  .metric-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 11px;
-    margin-top: 3px;
-  }
-  .metric-label { color: var(--fg-dim); }
-  .metric-value { font-variant-numeric: tabular-nums; }
-
-  .bar-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 4px;
+    flex-shrink: 0;
   }
   .bar {
     flex: 1;
@@ -119,28 +107,29 @@ func getHTML() string {
     color: var(--fg-dim);
     min-width: 30px;
     text-align: right;
+    flex-shrink: 0;
   }
   .bar-detail {
     font-size: 10px;
     color: var(--fg-dim);
     font-variant-numeric: tabular-nums;
-    margin-top: 2px;
+    margin-top: 4px;
   }
 
   .footer {
     text-align: center;
     font-size: 10px;
     color: var(--fg-dim);
-    padding: 4px 0;
+    padding: 2px 0;
   }
 
   /* 設定パネル */
   .settings {
     display: none;
     flex: 1;
-    padding: 10px;
+    padding: 8px 10px;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     overflow: hidden;
   }
   .settings.active { display: flex; }
@@ -167,19 +156,19 @@ func getHTML() string {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 8px 10px;
+    padding: 6px 10px;
   }
   .settings .group-title {
     font-size: 10px;
     font-weight: 600;
     color: var(--fg-dim);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
   .settings .row {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 4px;
+    margin-top: 2px;
   }
   .settings button {
     padding: 6px 12px;
@@ -207,21 +196,19 @@ func getHTML() string {
 
   <div class="content" id="main-view">
     <div class="section">
-      <div class="section-title">直近5時間</div>
-      <div class="bar-row">
-        <div class="metric-label" style="min-width:56px">トークン</div>
+      <div class="section-head">
+        <span class="section-title">直近5時間</span>
         <div class="bar"><div class="bar-fill" id="bar5h-tok" style="width:0%"></div></div>
-        <div class="bar-pct" id="pct5h-tok">0%</div>
+        <span class="bar-pct" id="pct5h-tok">0%</span>
       </div>
       <div class="bar-detail" id="detail5h-tok">0 / 0</div>
     </div>
 
     <div class="section">
-      <div class="section-title">直近7日間</div>
-      <div class="bar-row">
-        <div class="metric-label" style="min-width:56px">トークン</div>
+      <div class="section-head">
+        <span class="section-title">直近7日間</span>
         <div class="bar"><div class="bar-fill" id="bar7d-tok" style="width:0%"></div></div>
-        <div class="bar-pct" id="pct7d-tok">0%</div>
+        <span class="bar-pct" id="pct7d-tok">0%</span>
       </div>
       <div class="bar-detail" id="detail7d-tok">0 / 0</div>
     </div>

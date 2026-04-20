@@ -11,15 +11,13 @@ import (
 )
 
 type WindowSummary struct {
-	Tokens           int64 `json:"tokens"`
-	InputTokens      int64 `json:"inputTokens"`
-	OutputTokens     int64 `json:"outputTokens"`
-	CacheTokens      int64 `json:"cacheTokens"`
-	CacheReadTokens  int64 `json:"cacheReadTokens"`
-	Messages         int64 `json:"messages"`
-	Sessions         int64 `json:"sessions"`
-	LimitTokens      int64 `json:"limitTokens"`
-	LimitMessages    int64 `json:"limitMessages"`
+	Tokens          int64 `json:"tokens"`
+	InputTokens     int64 `json:"inputTokens"`
+	OutputTokens    int64 `json:"outputTokens"`
+	CacheTokens     int64 `json:"cacheTokens"`
+	CacheReadTokens int64 `json:"cacheReadTokens"`
+	Sessions        int64 `json:"sessions"`
+	LimitTokens     int64 `json:"limitTokens"`
 }
 
 type UsageSnapshot struct {
@@ -156,7 +154,6 @@ func aggregateWindow(events []usageEvent, since time.Time) WindowSummary {
 		}
 		sessions[e.SessionID] = true
 		if e.IsUser {
-			s.Messages++
 			continue
 		}
 		// アシスタントイベントは同一 message.id で複数回記録されることがある（thinking + tool_use 等）ので重複除外
@@ -179,21 +176,21 @@ func aggregateWindow(events []usageEvent, since time.Time) WindowSummary {
 
 // planPresetLimits はプラン名に対応するプリセット上限を返す。
 // トークン値は Claude Desktop の表示比率から逆算した実測相当値。
-func planPresetLimits(plan string) (tok5h, tok7d, msg5h, msg7d int64) {
+func planPresetLimits(plan string) (tok5h, tok7d int64) {
 	switch plan {
 	case "pro":
-		return 500000, 2000000, 45, 300
+		return 500000, 2000000
 	case "max100":
-		return 2500000, 10000000, 225, 1500
+		return 2500000, 10000000
 	case "max200":
-		return 9500000, 35000000, 900, 6000
+		return 9500000, 35000000
 	}
 	return
 }
 
 // estimateLimitsAuto は過去30日の最大日次メッセージ数からプランを推定し、
 // 該当プリセット値を返す。閾値はコミュニティ観測値。
-func estimateLimitsAuto() (tok5h, tok7d, msg5h, msg7d int64) {
+func estimateLimitsAuto() (tok5h, tok7d int64) {
 	if statsCachePath == "" {
 		return
 	}
@@ -226,43 +223,29 @@ func estimateLimitsAuto() (tok5h, tok7d, msg5h, msg7d int64) {
 	return
 }
 
-func computeLimits(cfg Config) (tok5h, tok7d, msg5h, msg7d int64) {
+func computeLimits(cfg Config) (tok5h, tok7d int64) {
 	// 1. 手動上書きが優先
 	tok5h = cfg.TokenLimit5h
 	tok7d = cfg.TokenLimit7d
-	msg5h = cfg.MsgLimit5h
-	msg7d = cfg.MsgLimit7d
 
 	// 2. プランプリセット
 	if cfg.Plan != "auto" && cfg.Plan != "custom" && cfg.Plan != "" {
-		pTok5h, pTok7d, pMsg5h, pMsg7d := planPresetLimits(cfg.Plan)
+		pTok5h, pTok7d := planPresetLimits(cfg.Plan)
 		if tok5h == 0 {
 			tok5h = pTok5h
 		}
 		if tok7d == 0 {
 			tok7d = pTok7d
 		}
-		if msg5h == 0 {
-			msg5h = pMsg5h
-		}
-		if msg7d == 0 {
-			msg7d = pMsg7d
-		}
 	}
 
 	// 3. 自動推定にフォールバック
-	aTok5h, aTok7d, aMsg5h, aMsg7d := estimateLimitsAuto()
+	aTok5h, aTok7d := estimateLimitsAuto()
 	if tok5h == 0 {
 		tok5h = aTok5h
 	}
 	if tok7d == 0 {
 		tok7d = aTok7d
-	}
-	if msg5h == 0 {
-		msg5h = aMsg5h
-	}
-	if msg7d == 0 {
-		msg7d = aMsg7d
 	}
 	return
 }
@@ -277,11 +260,9 @@ func refreshUsage() {
 	w5h := aggregateWindow(events, since5h)
 
 	cfg := snapshotConfig()
-	tok5h, tok7d, msg5h, msg7d := computeLimits(cfg)
+	tok5h, tok7d := computeLimits(cfg)
 	w5h.LimitTokens = tok5h
-	w5h.LimitMessages = msg5h
 	w7d.LimitTokens = tok7d
-	w7d.LimitMessages = msg7d
 
 	snap := UsageSnapshot{
 		FiveHour:  w5h,
