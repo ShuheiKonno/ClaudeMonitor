@@ -6,12 +6,22 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"syscall"
 	"unsafe"
 )
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// openExternalURL launches the default browser for the given URL via rundll32.
+// CREATE_NO_WINDOW を指定しコンソールの瞬間表示を抑止する。
+func openExternalURL(url string) {
+	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	_ = cmd.Start()
 }
 
 type settingsPayload struct {
@@ -108,6 +118,11 @@ func startServer() (int, error) {
 
 	mux.HandleFunc("/api/persistwindow", func(w http.ResponseWriter, r *http.Request) {
 		persistCurrentWindow()
+		writeJSON(w, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/open-usage", func(w http.ResponseWriter, r *http.Request) {
+		go openExternalURL("https://claude.ai/settings/usage")
 		writeJSON(w, map[string]any{"ok": true})
 	})
 
