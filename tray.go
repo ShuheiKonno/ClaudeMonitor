@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
+	"math"
 	"os"
 	"runtime"
 	"strconv"
@@ -297,22 +297,43 @@ func updateTrayFromSnapshot() {
 	setTrayIcon(hIcon, pct5h, pct7d)
 }
 
-func generateTrayIcon(pct5h, pct7d int) uintptr {
+// drawTrayIconImage は 16x16 のトレイアイコン画像を RGBA で組み立てる純関数。
+// アプリアイコン（assets/icon.ico）と共通の「円形 + 中央シンボル」意匠を踏襲し、
+// 7 日使用率を色と外周リングのフィル角度で、5 時間使用率を中央の数字で表現する。
+// 16px という極小サイズの可読性を優先し、リムは 1.2px・中央数字は basicfont 7x13。
+func drawTrayIconImage(pct5h, pct7d int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, trayIconSize, trayIconSize))
 
-	var bg, fg color.RGBA
+	// 7d バンドで配色決定。Claude 系の暖色系で統一。
+	var diskColor, rimColor, fgColor color.RGBA
 	switch {
 	case pct7d <= 50:
-		bg = color.RGBA{144, 238, 144, 255} // light green
-		fg = color.RGBA{0, 0, 0, 255}
+		diskColor = color.RGBA{R: 123, G: 176, B: 123, A: 255} // sage green #7BB07B
+		rimColor = color.RGBA{R: 77, G: 128, B: 77, A: 255}
+		fgColor = color.RGBA{R: 20, G: 28, B: 20, A: 255}
 	case pct7d <= 80:
-		bg = color.RGBA{255, 179, 71, 255} // light orange
-		fg = color.RGBA{0, 0, 0, 255}
+		diskColor = color.RGBA{R: 232, G: 168, B: 83, A: 255} // amber #E8A853
+		rimColor = color.RGBA{R: 172, G: 116, B: 45, A: 255}
+		fgColor = color.RGBA{R: 40, G: 26, B: 10, A: 255}
 	default:
-		bg = color.RGBA{230, 70, 70, 255} // red
-		fg = color.RGBA{255, 255, 255, 255}
+		diskColor = color.RGBA{R: 208, G: 107, B: 91, A: 255} // terracotta #D06B5B
+		rimColor = color.RGBA{R: 150, G: 64, B: 52, A: 255}
+		fgColor = color.RGBA{R: 248, G: 238, B: 232, A: 255}
 	}
-	draw.Draw(img, img.Bounds(), &image.Uniform{bg}, image.Point{}, draw.Src)
+
+	cx, cy := float64(trayIconSize)/2, float64(trayIconSize)/2
+	outerR := float64(trayIconSize)/2 - 0.5
+	innerR := outerR - 1.2
+
+	fillTrayDisk(img, cx, cy, outerR, rimColor)
+	fillTrayDisk(img, cx, cy, innerR, diskColor)
+
+	if pct7d > 0 {
+		sweep := float64(pct7d) / 100 * 2 * math.Pi
+		// リム全幅を覆うハイライトアーク。16px ではコントラスト優先のため不透明度 150。
+		overlay := color.RGBA{R: 255, G: 255, B: 255, A: 150}
+		fillTrayRing(img, cx, cy, outerR-1.3, outerR+0.1, -math.Pi/2, sweep, overlay)
+	}
 
 	val := pct5h
 	if val > 99 {
@@ -321,7 +342,7 @@ func generateTrayIcon(pct5h, pct7d int) uintptr {
 	text := strconv.Itoa(val)
 	drawer := &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(fg),
+		Src:  image.NewUniform(fgColor),
 		Face: basicfont.Face7x13,
 	}
 	w := drawer.MeasureString(text).Round()
@@ -331,8 +352,14 @@ func generateTrayIcon(pct5h, pct7d int) uintptr {
 	}
 	drawer.Dot = fixed.P(x, 12)
 	drawer.DrawString(text)
+	return img
+}
 
+func generateTrayIcon(pct5h, pct7d int) uintptr {
+	img := drawTrayIconImage(pct5h, pct7d)
 	bgra := make([]byte, len(img.Pix))
+	mask := make([]byte, 2*trayIconSize) // 1bpp AND マスク: 全 0 = すべて表示
+	// BGRA 変換。mask は全 0（= ソースアルファで透過）。
 	for i := 0; i < len(img.Pix); i += 4 {
 		bgra[i+0] = img.Pix[i+2]
 		bgra[i+1] = img.Pix[i+1]
@@ -344,7 +371,6 @@ func generateTrayIcon(pct5h, pct7d int) uintptr {
 	if hbmColor == 0 {
 		return 0
 	}
-	mask := make([]byte, 2*trayIconSize)
 	hbmMask, _, _ := procCreateBitmap.Call(trayIconSize, trayIconSize, 1, 1, uintptr(unsafe.Pointer(&mask[0])))
 	if hbmMask == 0 {
 		procDeleteObject.Call(hbmColor)
@@ -357,6 +383,100 @@ func generateTrayIcon(pct5h, pct7d int) uintptr {
 	procDeleteObject.Call(hbmColor)
 	procDeleteObject.Call(hbmMask)
 	return hIcon
+}
+
+// fillTrayDisk: アンチエイリアス付きで円盤を塗る（アルファは既存ピクセルにオーバー合成）。
+func fillTrayDisk(img *image.RGBA, cx, cy, r float64, c color.RGBA) {
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			dx := float64(x) + 0.5 - cx
+			dy := float64(y) + 0.5 - cy
+			d := math.Sqrt(dx*dx + dy*dy)
+			if d <= r-0.5 {
+				blendTray(img, x, y, c, 1)
+				continue
+			}
+			if d < r+0.5 {
+				blendTray(img, x, y, c, r+0.5-d)
+			}
+		}
+	}
+}
+
+// fillTrayRing: 円環の指定角度範囲を塗る。startAngle=-π/2 が 12 時方向。
+func fillTrayRing(img *image.RGBA, cx, cy, innerR, outerR, startAngle, sweep float64, c color.RGBA) {
+	if sweep <= 0 {
+		return
+	}
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			dx := float64(x) + 0.5 - cx
+			dy := float64(y) + 0.5 - cy
+			d := math.Sqrt(dx*dx + dy*dy)
+			if d > outerR+0.5 || d < innerR-0.5 {
+				continue
+			}
+			a := math.Atan2(dy, dx)
+			for a < startAngle {
+				a += 2 * math.Pi
+			}
+			if a-startAngle > sweep {
+				continue
+			}
+			alpha := 1.0
+			if d > outerR-0.5 {
+				alpha = math.Min(alpha, outerR+0.5-d)
+			}
+			if d < innerR+0.5 {
+				alpha = math.Min(alpha, d-(innerR-0.5))
+			}
+			if alpha <= 0 {
+				continue
+			}
+			blendTray(img, x, y, c, alpha)
+		}
+	}
+}
+
+func blendTray(img *image.RGBA, x, y int, c color.RGBA, alpha float64) {
+	if alpha <= 0 {
+		return
+	}
+	if alpha > 1 {
+		alpha = 1
+	}
+	i := img.PixOffset(x, y)
+	sa := float64(c.A) / 255 * alpha
+	sr := float64(c.R) / 255 * sa
+	sg := float64(c.G) / 255 * sa
+	sb := float64(c.B) / 255 * sa
+	dr := float64(img.Pix[i+0]) / 255
+	dg := float64(img.Pix[i+1]) / 255
+	db := float64(img.Pix[i+2]) / 255
+	da := float64(img.Pix[i+3]) / 255
+	outA := sa + da*(1-sa)
+	var outR, outG, outB float64
+	if outA > 0 {
+		outR = (sr + dr*da*(1-sa)) / outA
+		outG = (sg + dg*da*(1-sa)) / outA
+		outB = (sb + db*da*(1-sa)) / outA
+	}
+	img.Pix[i+0] = clamp255(outR * 255)
+	img.Pix[i+1] = clamp255(outG * 255)
+	img.Pix[i+2] = clamp255(outB * 255)
+	img.Pix[i+3] = clamp255(outA * 255)
+}
+
+func clamp255(v float64) uint8 {
+	if v <= 0 {
+		return 0
+	}
+	if v >= 255 {
+		return 255
+	}
+	return uint8(math.Round(v))
 }
 
 func fillNotifyIconData(nid *notifyIconData, tip string) {

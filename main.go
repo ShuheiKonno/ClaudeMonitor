@@ -143,6 +143,9 @@ func setupMainWindow(title string) bool {
 	newStyle := style &^ (WS_CAPTION | WS_THICKFRAME | WS_SYSMENU)
 	procSetWindowLong.Call(hwnd, uintptr(gwlStyle), newStyle)
 	procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED|SWP_NOMOVE|SWP_NOZORDER|SWP_NOSIZE)
+
+	// Alt+Tab / タイトルバー用にアプリアイコン（Claude オレンジの "C"）を適用。
+	applyWindowIcon(hwnd)
 	return true
 }
 
