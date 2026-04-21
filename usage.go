@@ -33,23 +33,27 @@ type UsageSnapshot struct {
 }
 
 var (
-	usageMu      sync.RWMutex
-	cachedUsage  UsageSnapshot
-	usageTrigger = make(chan struct{}, 1)
+	usageMu     sync.RWMutex
+	cachedUsage UsageSnapshot
+	// refreshMu は並行する refreshUsage 呼び出しを直列化して API への
+	// 重複フェッチを防ぐ（ticker / 手動更新 / トレイ更新 が同時に走っても 1 回にまとめる）。
+	refreshMu sync.Mutex
 )
 
 // refreshUsage は認証ファイル読み込み → API 呼び出しを同期実行する。
-// ネットワーク失敗時は直近の Utilization を保持したまま AuthState のみ更新。
+// ネットワーク失敗時は直近の Utilization と UpdatedAt を保持したまま AuthState のみ更新する
+// （UpdatedAt は「最終成功フェッチ時刻」の意味を保つ — 失敗時に now で上書きしない）。
 func refreshUsage() {
-	now := time.Now()
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
 
 	auth, err := loadAuthData()
 	if err != nil {
-		updateSnapshotErr("missing", fmt.Sprintf("認証情報を取得できません: %v", err), now)
+		updateSnapshotErr("missing", fmt.Sprintf("認証情報を取得できません: %v", err))
 		return
 	}
 	if auth.isExpired() {
-		updateSnapshotErr("expired", fmt.Sprintf("OAuth トークンの期限切れ（%s）", auth.ExpiresAt.Local().Format("2006-01-02 15:04")), now)
+		updateSnapshotErr("expired", fmt.Sprintf("OAuth トークンの期限切れ（%s）", auth.ExpiresAt.Local().Format("2006-01-02 15:04")))
 		return
 	}
 
@@ -61,14 +65,14 @@ func refreshUsage() {
 		if errors.Is(err, ErrAuthExpired) {
 			state = "expired"
 		}
-		// アカウント情報だけは更新しておく（UI の宛先表示用）
+		// アカウント情報だけは更新しておく（UI の宛先表示用）。
+		// UpdatedAt は成功時のスナップショット時刻を保持する（失敗時は更新しない）。
 		usageMu.Lock()
 		cachedUsage.Email = auth.Email
 		cachedUsage.DisplayName = auth.DisplayName
 		cachedUsage.SubscriptionType = auth.SubscriptionType
 		cachedUsage.AuthState = state
 		cachedUsage.LastError = err.Error()
-		cachedUsage.UpdatedAt = now
 		usageMu.Unlock()
 		updateTrayFromSnapshot()
 		return
@@ -81,7 +85,7 @@ func refreshUsage() {
 		DisplayName:      auth.DisplayName,
 		SubscriptionType: auth.SubscriptionType,
 		AuthState:        "ok",
-		UpdatedAt:        now,
+		UpdatedAt:        time.Now(),
 	}
 	usageMu.Lock()
 	cachedUsage = snap
@@ -104,18 +108,21 @@ func mapWindow(raw *rawUsageWindow) UsageWindow {
 	return u
 }
 
-func updateSnapshotErr(state, msg string, now time.Time) {
+// updateSnapshotErr は認証失敗などデータ取得以前のエラーを記録する。
+// UpdatedAt は触らない（最終成功フェッチ時刻を保持）。
+func updateSnapshotErr(state, msg string) {
 	usageMu.Lock()
 	cachedUsage.AuthState = state
 	cachedUsage.LastError = msg
-	cachedUsage.UpdatedAt = now
 	usageMu.Unlock()
 	fmt.Fprintln(os.Stderr, "[usage]", state, msg)
 	updateTrayFromSnapshot()
 }
 
 // startCollector はバックグラウンドの定期取得ループを開始する。
-// 5 分間隔 + 手動トリガ（triggerRefresh 経由）に反応する。
+// 初回フェッチは goroutine で非同期実行（起動をブロックしない）。
+// WebView フロントは authState=="init" の間だけ短間隔ポーリングし、
+// 取得完了後に 5 分 / 60 秒インターバルに切り替える想定。
 // プロセス寿命 = アプリ寿命なので明示的な停止は行わない（os.Exit でクリーンアップ）。
 func startCollector() {
 	usageMu.Lock()
@@ -127,23 +134,10 @@ func startCollector() {
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				refreshUsage()
-			case <-usageTrigger:
-				refreshUsage()
-			}
+		for range ticker.C {
+			refreshUsage()
 		}
 	}()
-}
-
-// triggerRefresh は非同期で refreshUsage を 1 回走らせる（多重呼び出しは coalesce）。
-func triggerRefresh() {
-	select {
-	case usageTrigger <- struct{}{}:
-	default:
-	}
 }
 
 func getUsageSnapshot() UsageSnapshot {
