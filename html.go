@@ -70,28 +70,34 @@ func getHTML() string {
     padding: 6px 8px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     overflow: hidden;
   }
 
   .row-bar {
+    flex: 1;
     display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 6px;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 10px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 4px;
   }
+  .row-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
   .row-label {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--fg-dim);
-    min-width: 36px;
+    min-width: 32px;
     flex-shrink: 0;
   }
   .bar {
     flex: 1;
-    height: 5px;
+    height: 16px;
     background: var(--bar-bg);
     border-radius: 3px;
     overflow: hidden;
@@ -104,20 +110,19 @@ func getHTML() string {
   .bar-fill.warn { background: var(--bar-warn); }
   .bar-fill.crit { background: var(--bar-crit); }
   .bar-pct {
-    font-size: 10px;
+    font-size: 12px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
     color: var(--fg);
-    min-width: 28px;
+    min-width: 30px;
     text-align: right;
     flex-shrink: 0;
   }
   .bar-reset {
-    font-size: 9px;
+    font-size: 10px;
     color: var(--fg-dim);
     font-variant-numeric: tabular-nums;
-    min-width: 34px;
     text-align: right;
-    flex-shrink: 0;
   }
 
   .footer {
@@ -152,7 +157,7 @@ func getHTML() string {
     flex: 1;
     padding: 6px 8px;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     overflow: hidden;
   }
   .settings.active { display: flex; }
@@ -161,29 +166,22 @@ func getHTML() string {
   .settings .group {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
-  }
-  .settings .group-title {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--fg-dim);
-    margin-bottom: 4px;
+    border-radius: 4px;
+    padding: 5px 8px;
   }
   .settings .row {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 2px;
   }
   .settings label {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     font-size: 11px;
   }
   .settings button {
-    padding: 5px 10px;
+    padding: 4px 10px;
     background: var(--accent);
     color: #12152a;
     border: none;
@@ -197,9 +195,9 @@ func getHTML() string {
   .settings .account {
     font-size: 10px;
     color: var(--fg-dim);
-    line-height: 1.5;
+    line-height: 1.3;
   }
-  .settings .account b { color: var(--fg); font-weight: 600; }
+  .settings .account b { color: var(--fg); font-weight: 600; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -219,17 +217,21 @@ func getHTML() string {
     </div>
 
     <div class="row-bar">
-      <span class="row-label">5時間</span>
-      <div class="bar"><div class="bar-fill" id="bar-5h" style="width:0%"></div></div>
-      <span class="bar-pct" id="pct-5h">—</span>
-      <span class="bar-reset" id="reset-5h"></span>
+      <div class="row-top">
+        <span class="row-label">5時間</span>
+        <div class="bar"><div class="bar-fill" id="bar-5h" style="width:0%"></div></div>
+        <span class="bar-pct" id="pct-5h">—</span>
+      </div>
+      <div class="bar-reset" id="reset-5h"></div>
     </div>
 
     <div class="row-bar">
-      <span class="row-label">7日</span>
-      <div class="bar"><div class="bar-fill" id="bar-7d" style="width:0%"></div></div>
-      <span class="bar-pct" id="pct-7d">—</span>
-      <span class="bar-reset" id="reset-7d"></span>
+      <div class="row-top">
+        <span class="row-label">7日</span>
+        <div class="bar"><div class="bar-fill" id="bar-7d" style="width:0%"></div></div>
+        <span class="bar-pct" id="pct-7d">—</span>
+      </div>
+      <div class="bar-reset" id="reset-7d"></div>
     </div>
 
     <div class="footer">
@@ -240,19 +242,17 @@ func getHTML() string {
 
   <div class="settings" id="settings-view">
     <div class="group">
-      <div class="group-title">アカウント</div>
       <div class="account" id="account-info">取得中…</div>
     </div>
 
     <div class="group">
-      <div class="group-title">表示オプション</div>
       <div class="row" style="gap:12px">
         <label><input type="checkbox" id="topmost"> 最前面</label>
         <label><input type="checkbox" id="transparent"> 半透明</label>
       </div>
     </div>
 
-    <div class="row" style="justify-content: flex-end; gap: 8px;">
+    <div class="row" style="justify-content: flex-end; gap: 6px; margin-top: auto;">
       <button id="btn-cancel" style="background: rgba(255,255,255,0.1); color: var(--fg);">戻る</button>
       <button id="btn-save">保存</button>
     </div>
