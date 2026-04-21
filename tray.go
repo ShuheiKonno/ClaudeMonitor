@@ -40,6 +40,7 @@ var (
 	procTrackPopupMenu   = user32.NewProc("TrackPopupMenu")
 	procDestroyMenu      = user32.NewProc("DestroyMenu")
 	procPostMessageW     = user32.NewProc("PostMessageW")
+	procMessageBoxW      = user32.NewProc("MessageBoxW")
 
 	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
 )
@@ -66,8 +67,12 @@ const (
 
 	SW_HIDE_VAL = 0
 
-	IDM_SHOW = 1
-	IDM_EXIT = 2
+	IDM_SHOW    = 1
+	IDM_EXIT    = 2
+	IDM_REAUTH  = 3
+	IDM_REFRESH = 4
+
+	MB_ICONINFORMATION = 0x00000040
 
 	trayIconID    = 1
 	trayIconSize  = 16
@@ -198,6 +203,13 @@ func trayWndProc(hwnd, msg uintptr, wParam, lParam uintptr) uintptr {
 		switch wParam & 0xFFFF {
 		case IDM_SHOW:
 			showMainWindow()
+		case IDM_REFRESH:
+			go func() {
+				refreshUsage()
+				updateTrayFromSnapshot()
+			}()
+		case IDM_REAUTH:
+			showReauthDialog()
 		case IDM_EXIT:
 			removeTrayIcon()
 			os.Exit(0)
@@ -258,8 +270,13 @@ func showTrayMenu(hwnd uintptr) {
 		return
 	}
 	showPtr, _ := syscall.UTF16PtrFromString("表示")
+	refreshPtr, _ := syscall.UTF16PtrFromString("更新")
+	reauthPtr, _ := syscall.UTF16PtrFromString("再認証…")
 	exitPtr, _ := syscall.UTF16PtrFromString("終了")
 	procAppendMenuW.Call(menu, MF_STRING, IDM_SHOW, uintptr(unsafe.Pointer(showPtr)))
+	procAppendMenuW.Call(menu, MF_STRING, IDM_REFRESH, uintptr(unsafe.Pointer(refreshPtr)))
+	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
+	procAppendMenuW.Call(menu, MF_STRING, IDM_REAUTH, uintptr(unsafe.Pointer(reauthPtr)))
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
 	procAppendMenuW.Call(menu, MF_STRING, IDM_EXIT, uintptr(unsafe.Pointer(exitPtr)))
 
@@ -272,29 +289,72 @@ func showTrayMenu(hwnd uintptr) {
 	procDestroyMenu.Call(menu)
 }
 
-func pct(used, limit int64) int {
-	if limit <= 0 {
+// showReauthDialog は OAuth の再認証手順を案内する情報ダイアログを表示する。
+// CLI から `claude` を起動してもらう前提。ワンクリックでシェルを開く機能は持たない。
+func showReauthDialog() {
+	msg := "Claude Monitor は Claude Code の認証情報（~/.claude/.credentials.json）を共有しています。\r\n\r\n" +
+		"再認証するには:\r\n" +
+		"1. ターミナル（コマンドプロンプト / PowerShell）を開く\r\n" +
+		"2. claude と入力して実行\r\n" +
+		"3. 画面の指示に従いログイン\r\n\r\n" +
+		"完了後、しばらくするとウィジェットが自動的に回復します。"
+	title := "Claude Monitor — 再認証"
+	msgPtr, _ := syscall.UTF16PtrFromString(msg)
+	titlePtr, _ := syscall.UTF16PtrFromString(title)
+	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(msgPtr)), uintptr(unsafe.Pointer(titlePtr)), MB_ICONINFORMATION)
+}
+
+// clampPct はサーバから返る float の使用率を表示用の整数 % に丸める（0–100 にクランプ）。
+func clampPct(v float64) int {
+	if math.IsNaN(v) || v <= 0 {
 		return 0
 	}
-	p := int(used * 100 / limit)
-	if p < 0 {
-		p = 0
+	if v >= 100 {
+		return 100
 	}
-	if p > 100 {
-		p = 100
-	}
-	return p
+	return int(math.Round(v))
 }
 
 func updateTrayFromSnapshot() {
 	snap := getUsageSnapshot()
-	pct5h := pct(snap.FiveHour.Tokens, snap.FiveHour.LimitTokens)
-	pct7d := pct(snap.SevenDay.Tokens, snap.SevenDay.LimitTokens)
+	if snap.AuthState != "ok" {
+		hIcon := generateErrorTrayIcon()
+		if hIcon == 0 {
+			return
+		}
+		setTrayIcon(hIcon, trayTooltipForError(snap))
+		return
+	}
+	pct5h := clampPct(snap.FiveHour.Utilization)
+	pct7d := clampPct(snap.SevenDay.Utilization)
 	hIcon := generateTrayIcon(pct5h, pct7d)
 	if hIcon == 0 {
 		return
 	}
-	setTrayIcon(hIcon, pct5h, pct7d)
+	tip := fmt.Sprintf("Claude モニター\n5h: %d%% / 7d: %d%%", pct5h, pct7d)
+	setTrayIcon(hIcon, tip)
+}
+
+func trayTooltipForError(snap UsageSnapshot) string {
+	switch snap.AuthState {
+	case "missing":
+		return "Claude モニター — 未ログイン\n右クリック → 再認証"
+	case "expired":
+		return "Claude モニター — トークン期限切れ\n右クリック → 再認証"
+	case "network_error":
+		return "Claude モニター — 取得失敗\n" + truncateString(snap.LastError, 80)
+	case "init":
+		return "Claude モニター — 取得中…"
+	}
+	return "Claude モニター — エラー"
+}
+
+func truncateString(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // drawTrayIconImage は 16x16 のトレイアイコン画像を RGBA で組み立てる純関数。
@@ -356,10 +416,45 @@ func drawTrayIconImage(pct5h, pct7d int) *image.RGBA {
 }
 
 func generateTrayIcon(pct5h, pct7d int) uintptr {
-	img := drawTrayIconImage(pct5h, pct7d)
+	return imageToHICON(drawTrayIconImage(pct5h, pct7d))
+}
+
+// generateErrorTrayIcon は認証エラー・通信エラー用のグレー "?" アイコンを返す。
+func generateErrorTrayIcon() uintptr {
+	return imageToHICON(drawTrayIconErrorImage())
+}
+
+func drawTrayIconErrorImage() *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, trayIconSize, trayIconSize))
+	disk := color.RGBA{R: 110, G: 114, B: 126, A: 255}
+	rim := color.RGBA{R: 70, G: 72, B: 82, A: 255}
+	fg := color.RGBA{R: 250, G: 250, B: 255, A: 255}
+	cx, cy := float64(trayIconSize)/2, float64(trayIconSize)/2
+	outerR := float64(trayIconSize)/2 - 0.5
+	innerR := outerR - 1.2
+	fillTrayDisk(img, cx, cy, outerR, rim)
+	fillTrayDisk(img, cx, cy, innerR, disk)
+
+	drawer := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(fg),
+		Face: basicfont.Face7x13,
+	}
+	text := "?"
+	w := drawer.MeasureString(text).Round()
+	x := (trayIconSize - w) / 2
+	if x < 0 {
+		x = 0
+	}
+	drawer.Dot = fixed.P(x, 12)
+	drawer.DrawString(text)
+	return img
+}
+
+// imageToHICON は 16x16 RGBA を 32bpp BGRA + 1bpp AND マスクに変換し Win32 HICON を生成。
+func imageToHICON(img *image.RGBA) uintptr {
 	bgra := make([]byte, len(img.Pix))
 	mask := make([]byte, 2*trayIconSize) // 1bpp AND マスク: 全 0 = すべて表示
-	// BGRA 変換。mask は全 0（= ソースアルファで透過）。
 	for i := 0; i < len(img.Pix); i += 4 {
 		bgra[i+0] = img.Pix[i+2]
 		bgra[i+1] = img.Pix[i+1]
@@ -512,14 +607,14 @@ func addTrayIcon() {
 	trayAdded = true
 }
 
-func setTrayIcon(hIcon uintptr, pct5h, pct7d int) {
+func setTrayIcon(hIcon uintptr, tip string) {
 	trayMu.Lock()
 	defer trayMu.Unlock()
 	if !trayAdded {
 		return
 	}
 	var nid notifyIconData
-	fillNotifyIconData(&nid, fmt.Sprintf("Claude モニター — 5h: %d%% / 7d: %d%%", pct5h, pct7d))
+	fillNotifyIconData(&nid, tip)
 	nid.UFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE
 	nid.HIcon = hIcon
 	procShellNotifyIcon.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))

@@ -15,12 +15,8 @@ type Config struct {
 		Height int32 `json:"height"`
 		Saved  bool  `json:"saved"`
 	} `json:"window"`
-	Topmost     bool   `json:"topmost"`
-	Transparent bool   `json:"transparent"`
-	Plan        string `json:"plan"` // "auto" | "pro" | "max100" | "max200" | "custom"
-
-	TokenLimit5h int64 `json:"tokenLimit5h"`
-	TokenLimit7d int64 `json:"tokenLimit7d"`
+	Topmost     bool `json:"topmost"`
+	Transparent bool `json:"transparent"`
 }
 
 var (
@@ -32,7 +28,6 @@ var (
 func defaultConfig() Config {
 	var c Config
 	c.Topmost = true
-	c.Plan = "auto"
 	return c
 }
 

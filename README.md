@@ -1,26 +1,32 @@
 # Claude Monitor
 
-Claude Code（サブスクリプションプラン）のトークン使用量を常時モニタするための Windows デスクトップウィジェット。
+Claude Code（サブスクリプションプラン）のトークン使用量を Anthropic サーバから直接取得して常時モニタする Windows デスクトップウィジェット。
 
-- **直近5時間** と **直近7日間** のトークン使用率を Claude Desktop とほぼ同じ基準で算出・可視化
+- **5時間セッション / 7日** の 2 ウィンドウをサーバから取得して表示
 - **システムトレイアイコン**が 5h 使用率を数字で、7d 使用率を背景色（緑 / 橙 / 赤）で表示
-- フレームレスで常に最前面に置ける省スペース設計（240 × 170 px）
-- `~/.claude/projects/*/*.jsonl` のローカルログを直接解析するため、外部 API アクセス不要
+- 各ウィンドウの**次回リセット時刻**までのカウントダウンを表示
+- フレームレスで常に最前面に置ける省スペース設計（260 × 150 px）
+- Claude Code が保存した OAuth トークン（`~/.claude/.credentials.json`）を再利用するので別途ログイン不要
 
 ## ダウンロード
 
 Windows 用のビルド済みバイナリは [Releases](https://github.com/ShuheiKonno/ClaudeMonitor/releases) から取得できます。`claude-monitor.exe` をダブルクリックするだけで起動します（インストール不要）。
 
+## 前提
+
+1. Claude Code CLI をインストール済みでログインしていること（`~/.claude/.credentials.json` が存在する状態）
+2. 未ログインまたは期限切れの場合は、ウィジェット／トレイに案内が出ます。ターミナルで `claude` を実行してください
+
 ## 使い方
 
 1. `claude-monitor.exe` を起動すると右下に半透明ウィジェットが表示されます
 2. 通知領域（タスクトレイ）にアイコンが常駐します
-3. 設定（⚙）でご利用中のプラン（Pro / Max $100 / Max $200 / 自動推定）を選択
+3. 設定（⚙）で最前面・半透明を切替
 4. 閉じる（✕）で**タスクトレイにしまう**、終了はトレイアイコンの右クリック → 終了
 
 ### タスクトレイアイコンの見かた
 
-円形のディスク + 中央に直近 5 時間の使用率（%）。外周のリングは 7 日使用率を 12 時方向始点・時計回りに埋めるゲージで、使用率バンドに応じて全体の色味も変わります。
+円形のディスク + 中央に直近 5 時間の使用率（%）。外周のリングは 7 日使用率を 12 時方向始点・時計回りに埋めるゲージで、使用率バンドに応じて全体の色味も変わります。認証エラー時はグレー "?" アイコンになります。
 
 | ディスク色 | 7日間使用率 |
 |---|---|
@@ -31,39 +37,37 @@ Windows 用のビルド済みバイナリは [Releases](https://github.com/Shuhe
 ### 操作
 
 - **✕**: ウィジェットをトレイへしまう
-- **⚙**: 設定画面（プラン・最前面・半透明）
-- **⟳**: 手動で使用量を再計測
+- **⚙**: 設定画面（最前面 / 半透明）
+- **⟳**: 手動で使用量を再取得
 - **トレイ左クリック**: ウィジェットを再表示
-- **トレイ右クリック**: メニュー（表示 / 終了）
+- **トレイ右クリック**: メニュー（表示 / 更新 / 再認証 / 終了）
 - **タイトルバーをドラッグ**: ウィジェット移動（位置は保存されます）
 
 ## 仕組み
 
 ### データソース
 
-Claude Code が `~/.claude/projects/<project>/<session>.jsonl` に書き出す生ログの `message.usage` フィールドをストリーミング解析し、セッションをまたいで集計します。
-
-### トークン計測
-
-Anthropic の使用量リミットはコスト換算で計測されるため、以下の式で概算しています:
+[jjsmackay/claude-usage-vscode](https://github.com/jjsmackay/claude-usage-vscode) と同じアプローチで、Anthropic の非公開 OAuth エンドポイントに直接問い合わせます。
 
 ```
-使用トークン = input_tokens + output_tokens + cache_creation_input_tokens
+GET https://api.anthropic.com/api/oauth/usage
+Authorization: Bearer <access_token>
+anthropic-beta: oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14
 ```
 
-`cache_read_input_tokens` は billing 単価が input の約 1/10 かつ会話履歴の再読込で毎ターン数百万トークン発生するため、リミット比較から除外しています。
+Access token は Claude Code CLI がログイン時に保存した `~/.claude/.credentials.json` から再利用します。ユーザー情報（表示名・メール）は `~/.claude.json` の `oauthAccount` を参照します。
 
-### プランプリセット（2026-04 時点の観測値）
+### レスポンス
 
-| プラン | 5h リミット | 7d リミット |
-|---|---|---|
-| Pro | 500K tokens | 2M tokens |
-| Max $100 (5x) | 2.5M tokens | 10M tokens |
-| Max $200 (20x) | 9.5M tokens | 35M tokens |
+`five_hour`（5時間セッション）と `seven_day`（7日間）の `utilization` と `resets_at` をそのまま表示します。サーバは `seven_day_opus` / `seven_day_oauth_apps` など追加ウィンドウも返しますが、シンプルさ優先で UI では使用しません。上限トークン数やプラン判定はサーバ側で行われているため、クライアントは解釈不要です。
 
-Anthropic は公式のしきい値を公開していないため、Claude Desktop の表示から逆算した推定値です。手元の環境で Claude Desktop の使用率とほぼ一致することを確認しています。
+### ポーリング
 
-「自動推定」を選ぶと `~/.claude/stats-cache.json` の過去30日の日次最大メッセージ数からプランを推定してプリセットを適用します。
+既定 5 分間隔。認証エラー時は直近表示を保持しつつ UI にバナーを表示し、通信エラーは自動で回復を待ちます。
+
+### 注意事項
+
+この API は公式ドキュメント化されていないため、Anthropic による仕様変更で動作しなくなる可能性があります。
 
 ## アイコン
 
@@ -73,15 +77,13 @@ Anthropic は公式のしきい値を公開していないため、Claude Deskto
 go run ./cmd/genicon   # assets/icon.ico と assets/icon-preview.png を再生成
 ```
 
-Explorer の `.exe` 表示用アイコンが必要な場合は [`rsrc`](https://github.com/akavel/rsrc) で PE リソースを埋め込めます:
+Explorer の `.exe` 表示用アイコンは `rsrc_windows_amd64.syso` 経由で自動的に埋め込まれます。再生成する場合:
 
 ```bash
 go install github.com/akavel/rsrc@latest
 rsrc -ico assets/icon.ico -arch amd64 -o rsrc_windows_amd64.syso
 go build -ldflags "-H windowsgui" -o claude-monitor.exe .
 ```
-
-なお、本体起動時には `//go:embed` した `icon.ico` を `WM_SETICON` でウィンドウに適用するため、`rsrc` を使わなくてもタイトルバー・Alt+Tab・タスクバーには正しいアイコンが表示されます。
 
 ## ビルド
 
@@ -108,7 +110,8 @@ go test ./...
 
 - Go 1.25.6
 - [go-webview2](https://github.com/jchv/go-webview2)（WebView2 ラッパー）
-- Win32 API 直叩き（Shell_NotifyIcon / SetLayeredWindowAttributes / Monitor API）
+- Win32 API 直叩き（Shell_NotifyIcon / SetLayeredWindowAttributes / Monitor API / MessageBoxW）
+- 標準 `net/http` で Anthropic OAuth エンドポイントを呼び出し
 - `golang.org/x/image` でトレイアイコンの動的描画
 
 ## ライセンス

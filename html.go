@@ -19,6 +19,8 @@ func getHTML() string {
     --bar-ok: #4ade80;
     --bar-warn: #facc15;
     --bar-crit: #f87171;
+    --err-bg: rgba(248,113,113,0.15);
+    --err-border: rgba(248,113,113,0.4);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -37,59 +39,59 @@ func getHTML() string {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 10px;
+    padding: 4px 8px;
     background: rgba(0,0,0,0.25);
     border-bottom: 1px solid var(--border);
     cursor: move;
   }
   .title {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .title-actions { display: flex; gap: 4px; }
+  .title-actions { display: flex; gap: 2px; flex-shrink: 0; }
   .title-btn {
-    width: 20px; height: 20px;
+    width: 18px; height: 18px;
     display: flex; align-items: center; justify-content: center;
     background: transparent;
     border: none;
     color: var(--fg-dim);
     cursor: pointer;
     border-radius: 3px;
-    font-size: 12px;
+    font-size: 11px;
   }
   .title-btn:hover { background: rgba(255,255,255,0.1); color: var(--fg); }
 
   .content {
     flex: 1;
-    padding: 8px 10px;
+    padding: 6px 8px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
     overflow: hidden;
   }
 
-  .section {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
-  }
-  .section-head {
+  .row-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    padding: 3px 6px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
   }
-  .section-title {
+  .row-label {
     font-size: 10px;
-    font-weight: 600;
     color: var(--fg-dim);
-    letter-spacing: 0.05em;
+    min-width: 36px;
     flex-shrink: 0;
   }
   .bar {
     flex: 1;
-    height: 6px;
+    height: 5px;
     background: var(--bar-bg);
     border-radius: 3px;
     overflow: hidden;
@@ -104,30 +106,51 @@ func getHTML() string {
   .bar-pct {
     font-size: 10px;
     font-variant-numeric: tabular-nums;
-    color: var(--fg-dim);
-    min-width: 30px;
+    color: var(--fg);
+    min-width: 28px;
     text-align: right;
     flex-shrink: 0;
   }
-  .bar-detail {
-    font-size: 10px;
+  .bar-reset {
+    font-size: 9px;
     color: var(--fg-dim);
     font-variant-numeric: tabular-nums;
-    margin-top: 4px;
+    min-width: 34px;
+    text-align: right;
+    flex-shrink: 0;
   }
 
   .footer {
-    text-align: center;
-    font-size: 10px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
     color: var(--fg-dim);
-    padding: 2px 0;
+    padding: 2px 0 0;
+  }
+
+  .auth-banner {
+    display: none;
+    background: var(--err-bg);
+    border: 1px solid var(--err-border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 10px;
+    line-height: 1.4;
+  }
+  .auth-banner.show { display: block; }
+  .auth-banner strong { color: #fca5a5; }
+  .auth-banner code {
+    background: rgba(0,0,0,0.3);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 10px;
   }
 
   /* 設定パネル */
   .settings {
     display: none;
     flex: 1;
-    padding: 8px 10px;
+    padding: 6px 8px;
     flex-direction: column;
     gap: 6px;
     overflow: hidden;
@@ -135,23 +158,6 @@ func getHTML() string {
   .settings.active { display: flex; }
   .content.hidden { display: none; }
 
-  .settings label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-  }
-  .settings input[type="number"],
-  .settings select {
-    flex: 1;
-    background: rgba(0,0,0,0.3);
-    border: 1px solid var(--border);
-    color: var(--fg);
-    padding: 3px 6px;
-    border-radius: 3px;
-    font-size: 11px;
-    font-family: inherit;
-  }
   .settings .group {
     background: var(--card);
     border: 1px solid var(--border);
@@ -170,8 +176,14 @@ func getHTML() string {
     gap: 6px;
     margin-top: 2px;
   }
+  .settings label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+  }
   .settings button {
-    padding: 6px 12px;
+    padding: 5px 10px;
     background: var(--accent);
     color: #12152a;
     border: none;
@@ -182,11 +194,17 @@ func getHTML() string {
     font-family: inherit;
   }
   .settings button:hover { opacity: 0.85; }
+  .settings .account {
+    font-size: 10px;
+    color: var(--fg-dim);
+    line-height: 1.5;
+  }
+  .settings .account b { color: var(--fg); font-weight: 600; }
 </style>
 </head>
 <body>
   <div class="titlebar" id="titlebar">
-    <div class="title">Claude モニター</div>
+    <div class="title" id="title-text">Claude モニター</div>
     <div class="title-actions">
       <button class="title-btn" id="btn-refresh" title="更新">⟳</button>
       <button class="title-btn" id="btn-settings" title="設定">⚙</button>
@@ -195,38 +213,35 @@ func getHTML() string {
   </div>
 
   <div class="content" id="main-view">
-    <div class="section">
-      <div class="section-head">
-        <span class="section-title">直近5時間</span>
-        <div class="bar"><div class="bar-fill" id="bar5h-tok" style="width:0%"></div></div>
-        <span class="bar-pct" id="pct5h-tok">0%</span>
-      </div>
-      <div class="bar-detail" id="detail5h-tok">0 / 0</div>
+    <div class="auth-banner" id="auth-banner">
+      <strong id="auth-banner-title">認証エラー</strong>
+      <div id="auth-banner-body">ターミナルで <code>claude</code> を実行してログインしてください。</div>
     </div>
 
-    <div class="section">
-      <div class="section-head">
-        <span class="section-title">直近7日間</span>
-        <div class="bar"><div class="bar-fill" id="bar7d-tok" style="width:0%"></div></div>
-        <span class="bar-pct" id="pct7d-tok">0%</span>
-      </div>
-      <div class="bar-detail" id="detail7d-tok">0 / 0</div>
+    <div class="row-bar">
+      <span class="row-label">5時間</span>
+      <div class="bar"><div class="bar-fill" id="bar-5h" style="width:0%"></div></div>
+      <span class="bar-pct" id="pct-5h">—</span>
+      <span class="bar-reset" id="reset-5h"></span>
     </div>
 
-    <div class="footer" id="updated">未更新</div>
+    <div class="row-bar">
+      <span class="row-label">7日</span>
+      <div class="bar"><div class="bar-fill" id="bar-7d" style="width:0%"></div></div>
+      <span class="bar-pct" id="pct-7d">—</span>
+      <span class="bar-reset" id="reset-7d"></span>
+    </div>
+
+    <div class="footer">
+      <span id="account-label"></span>
+      <span id="updated">未更新</span>
+    </div>
   </div>
 
   <div class="settings" id="settings-view">
     <div class="group">
-      <div class="row">
-        <span style="min-width:48px">プラン</span>
-        <select id="plan-select">
-          <option value="auto">自動推定（履歴から）</option>
-          <option value="pro">Claude Pro</option>
-          <option value="max100">Claude Max $100</option>
-          <option value="max200">Claude Max $200</option>
-        </select>
-      </div>
+      <div class="group-title">アカウント</div>
+      <div class="account" id="account-info">取得中…</div>
     </div>
 
     <div class="group">
@@ -250,42 +265,103 @@ function formatRelative(iso) {
   const t = new Date(iso);
   const diff = (Date.now() - t.getTime()) / 1000;
   if (diff < 5) return 'たった今';
-  if (diff < 60) return Math.floor(diff) + '秒前に更新';
-  if (diff < 3600) return Math.floor(diff/60) + '分前に更新';
-  if (diff < 86400) return Math.floor(diff/3600) + '時間前に更新';
-  return Math.floor(diff/86400) + '日前に更新';
+  if (diff < 60) return Math.floor(diff) + '秒前';
+  if (diff < 3600) return Math.floor(diff/60) + '分前';
+  if (diff < 86400) return Math.floor(diff/3600) + '時間前';
+  return Math.floor(diff/86400) + '日前';
 }
 
-function applyBar(pctEl, barEl, detailEl, used, limit) {
-  const pct = limit > 0 ? Math.min(100, Math.round(used * 100 / limit)) : 0;
-  pctEl.textContent = limit > 0 ? (pct + '%') : '—';
-  barEl.style.width = (limit > 0 ? pct : 0) + '%';
+function formatCountdown(iso) {
+  if (!iso) return '';
+  const t = new Date(iso);
+  const sec = Math.max(0, Math.floor((t.getTime() - Date.now()) / 1000));
+  if (sec < 60) return sec + 's';
+  const m = Math.floor(sec / 60);
+  if (m < 60) return m + 'm';
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  if (h < 24) return rem > 0 ? h + 'h ' + rem + 'm' : h + 'h';
+  const d = Math.floor(h / 24);
+  return d + 'd';
+}
+
+function applyWindow(prefix, win) {
+  const pctEl = document.getElementById('pct-' + prefix);
+  const barEl = document.getElementById('bar-' + prefix);
+  const resetEl = document.getElementById('reset-' + prefix);
+  if (!win || typeof win.utilization !== 'number' || (win.utilization === 0 && !win.resetsAt)) {
+    // サーバが 0% を返すこともあるが resetsAt が無ければ未取得扱い
+    pctEl.textContent = '—';
+    barEl.style.width = '0%';
+    barEl.classList.remove('warn', 'crit');
+    resetEl.textContent = '';
+    return;
+  }
+  const pct = Math.max(0, Math.min(100, Math.round(win.utilization)));
+  pctEl.textContent = pct + '%';
+  barEl.style.width = pct + '%';
   barEl.classList.remove('warn', 'crit');
   if (pct >= 95) barEl.classList.add('crit');
   else if (pct >= 80) barEl.classList.add('warn');
-  const limitText = limit > 0 ? ('約' + numFmt.format(limit)) : '未設定';
-  detailEl.textContent = numFmt.format(used) + ' / ' + limitText;
+  resetEl.textContent = formatCountdown(win.resetsAt);
 }
 
 let lastUpdated = null;
+let lastSnapshot = null;
+
+function renderAuthBanner(snap) {
+  const banner = document.getElementById('auth-banner');
+  const titleEl = document.getElementById('auth-banner-title');
+  const bodyEl = document.getElementById('auth-banner-body');
+  if (!snap || snap.authState === 'ok' || snap.authState === 'init') {
+    banner.classList.remove('show');
+    return;
+  }
+  banner.classList.add('show');
+  switch (snap.authState) {
+    case 'missing':
+      titleEl.textContent = '未ログイン';
+      bodyEl.innerHTML = 'ターミナルで <code>claude</code> を実行してログインしてください。';
+      break;
+    case 'expired':
+      titleEl.textContent = 'トークン期限切れ';
+      bodyEl.innerHTML = 'ターミナルで <code>claude</code> を実行して再ログインしてください。';
+      break;
+    case 'network_error':
+      titleEl.textContent = '取得失敗';
+      bodyEl.textContent = snap.lastError || 'ネットワークエラー';
+      break;
+    default:
+      titleEl.textContent = 'エラー';
+      bodyEl.textContent = snap.lastError || '';
+  }
+}
+
+function renderAccount(snap) {
+  const label = document.getElementById('account-label');
+  const info = document.getElementById('account-info');
+  const plan = snap.subscriptionType || '';
+  const name = snap.displayName || snap.email || '';
+  label.textContent = plan ? plan : '';
+  if (!name) {
+    info.textContent = '未ログイン';
+    return;
+  }
+  info.innerHTML = '<b>' + name + '</b>' +
+    (snap.email && snap.email !== name ? '<br>' + snap.email : '') +
+    (plan ? '<br>プラン: ' + plan : '');
+}
 
 async function fetchUsage() {
   try {
     const res = await fetch('/api/usage');
-    const u = await res.json();
-    applyBar(
-      document.getElementById('pct5h-tok'),
-      document.getElementById('bar5h-tok'),
-      document.getElementById('detail5h-tok'),
-      u.fiveHour.tokens, u.fiveHour.limitTokens);
-
-    applyBar(
-      document.getElementById('pct7d-tok'),
-      document.getElementById('bar7d-tok'),
-      document.getElementById('detail7d-tok'),
-      u.sevenDay.tokens, u.sevenDay.limitTokens);
-
-    lastUpdated = u.updatedAt;
+    const snap = await res.json();
+    lastSnapshot = snap;
+    applyWindow('5h', snap.fiveHour);
+    applyWindow('7d', snap.sevenDay);
+    renderAuthBanner(snap);
+    renderAccount(snap);
+    lastUpdated = snap.updatedAt;
     updateFooter();
   } catch (e) {
     document.getElementById('updated').textContent = '取得エラー';
@@ -296,6 +372,10 @@ function updateFooter() {
   if (lastUpdated) {
     document.getElementById('updated').textContent = formatRelative(lastUpdated);
   }
+  if (lastSnapshot) {
+    applyWindow('5h', lastSnapshot.fiveHour);
+    applyWindow('7d', lastSnapshot.sevenDay);
+  }
 }
 
 // --- タイトルバーのボタン ---
@@ -303,9 +383,7 @@ document.getElementById('btn-close').addEventListener('click', () => {
   fetch('/api/close', { method: 'GET' });
 });
 document.getElementById('btn-refresh').addEventListener('click', async () => {
-  const res = await fetch('/api/refresh');
-  const u = await res.json();
-  lastUpdated = u.updatedAt;
+  await fetch('/api/refresh');
   fetchUsage();
 });
 
@@ -316,7 +394,6 @@ const settingsView = document.getElementById('settings-view');
 async function openSettings() {
   const res = await fetch('/api/settings');
   const s = await res.json();
-  document.getElementById('plan-select').value = s.plan || 'auto';
   document.getElementById('topmost').checked = !!s.topmost;
   document.getElementById('transparent').checked = !!s.transparent;
   mainView.classList.add('hidden');
@@ -330,7 +407,6 @@ document.getElementById('btn-settings').addEventListener('click', openSettings);
 document.getElementById('btn-cancel').addEventListener('click', closeSettings);
 document.getElementById('btn-save').addEventListener('click', async () => {
   const payload = {
-    plan: document.getElementById('plan-select').value,
     topmost: document.getElementById('topmost').checked,
     transparent: document.getElementById('transparent').checked,
   };
