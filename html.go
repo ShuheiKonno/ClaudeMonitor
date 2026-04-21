@@ -70,7 +70,7 @@ func getHTML() string {
     padding: 6px 8px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     overflow: hidden;
   }
 
@@ -78,8 +78,8 @@ func getHTML() string {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    padding: 6px 10px;
+    gap: 2px;
+    padding: 4px 10px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -124,6 +124,18 @@ func getHTML() string {
     font-variant-numeric: tabular-nums;
     text-align: right;
   }
+
+  .detail-link {
+    display: block;
+    text-align: center;
+    font-size: 10px;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 2px 0;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .detail-link:hover { text-decoration: underline; }
 
   .footer {
     display: flex;
@@ -234,6 +246,8 @@ func getHTML() string {
       <div class="bar-reset" id="reset-7d"></div>
     </div>
 
+    <span class="detail-link" id="detail-link">詳細を確認 →</span>
+
     <div class="footer">
       <span id="account-label"></span>
       <span id="updated">未更新</span>
@@ -274,18 +288,18 @@ function formatRelative(iso) {
   return Math.floor(diff/86400) + '日前';
 }
 
-function formatCountdown(iso) {
+const JP_WEEKDAYS = ['日','月','火','水','木','金','土'];
+
+function formatResetDateTime(iso) {
   if (!iso) return '';
   const t = new Date(iso);
-  const sec = Math.max(0, Math.floor((t.getTime() - Date.now()) / 1000));
-  if (sec < 60) return sec + 's';
-  const m = Math.floor(sec / 60);
-  if (m < 60) return m + 'm';
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  if (h < 24) return rem > 0 ? h + 'h ' + rem + 'm' : h + 'h';
-  const d = Math.floor(h / 24);
-  return d + 'd';
+  if (isNaN(t.getTime())) return '';
+  const mo = t.getMonth() + 1;
+  const d = t.getDate();
+  const w = JP_WEEKDAYS[t.getDay()];
+  const hh = String(t.getHours()).padStart(2, '0');
+  const mm = String(t.getMinutes()).padStart(2, '0');
+  return 'リセット日時: ' + mo + '月' + d + '日（' + w + '）' + hh + ':' + mm;
 }
 
 function applyWindow(prefix, win) {
@@ -306,7 +320,7 @@ function applyWindow(prefix, win) {
   barEl.classList.remove('warn', 'crit');
   if (pct >= 95) barEl.classList.add('crit');
   else if (pct >= 80) barEl.classList.add('warn');
-  resetEl.textContent = formatCountdown(win.resetsAt);
+  resetEl.textContent = formatResetDateTime(win.resetsAt);
 }
 
 let lastUpdated = null;
@@ -403,6 +417,10 @@ document.getElementById('btn-refresh').addEventListener('click', async () => {
     btn.disabled = false;
     btn.style.opacity = '';
   }
+});
+document.getElementById('detail-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  fetch('/api/open-usage');
 });
 
 // --- 設定パネル ---
