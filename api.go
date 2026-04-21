@@ -60,9 +60,10 @@ func startServer() (int, error) {
 	})
 
 	mux.HandleFunc("/api/refresh", func(w http.ResponseWriter, r *http.Request) {
-		// 非同期でフェッチを予約（同一ウィンドウでの多重呼び出しは coalesce）。
-		// HTTP 側では現在キャッシュされている snapshot を即時返し UI 遷移をブロックしない。
-		triggerRefresh()
+		// 同期でフェッチを実行し、完了後の最新 snapshot を返す。
+		// 「更新」ボタンを押した直後に古い値を返さないために重要。
+		// refreshMu により並行呼び出しは直列化（重複フェッチ防止）。
+		refreshUsage()
 		writeJSON(w, getUsageSnapshot())
 	})
 

@@ -262,6 +262,9 @@ func getHTML() string {
 const numFmt = new Intl.NumberFormat('ja-JP');
 
 function formatRelative(iso) {
+  // Go の time.Time ゼロ値は "0001-01-01T00:00:00Z" にマーシャルされるため、
+  // 「一度も成功していない」を未取得として表示する。
+  if (!iso || iso.startsWith('0001-')) return '未取得';
   const t = new Date(iso);
   const diff = (Date.now() - t.getTime()) / 1000;
   if (diff < 5) return 'たった今';
@@ -352,17 +355,20 @@ function renderAccount(snap) {
     (plan ? '<br>プラン: ' + plan : '');
 }
 
+function applySnapshot(snap) {
+  lastSnapshot = snap;
+  applyWindow('5h', snap.fiveHour);
+  applyWindow('7d', snap.sevenDay);
+  renderAuthBanner(snap);
+  renderAccount(snap);
+  lastUpdated = snap.updatedAt;
+  updateFooter();
+}
+
 async function fetchUsage() {
   try {
     const res = await fetch('/api/usage');
-    const snap = await res.json();
-    lastSnapshot = snap;
-    applyWindow('5h', snap.fiveHour);
-    applyWindow('7d', snap.sevenDay);
-    renderAuthBanner(snap);
-    renderAccount(snap);
-    lastUpdated = snap.updatedAt;
-    updateFooter();
+    applySnapshot(await res.json());
   } catch (e) {
     document.getElementById('updated').textContent = '取得エラー';
   }
@@ -383,8 +389,20 @@ document.getElementById('btn-close').addEventListener('click', () => {
   fetch('/api/close', { method: 'GET' });
 });
 document.getElementById('btn-refresh').addEventListener('click', async () => {
-  await fetch('/api/refresh');
-  fetchUsage();
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  btn.style.opacity = '0.5';
+  try {
+    // /api/refresh は同期でフェッチ → 最新 snapshot を返す。
+    // 並行クリックは refreshMu で直列化されるためボタンも disabled にして重複抑止。
+    const res = await fetch('/api/refresh');
+    applySnapshot(await res.json());
+  } catch (e) {
+    document.getElementById('updated').textContent = '取得エラー';
+  } finally {
+    btn.disabled = false;
+    btn.style.opacity = '';
+  }
 });
 
 // --- 設定パネル ---
@@ -437,8 +455,16 @@ document.addEventListener('mouseup', () => {
   }
 });
 
-fetchUsage();
-setInterval(fetchUsage, 60000);
+// 起動直後は authState=="init" の空スナップショットを返すので短間隔でポーリングし、
+// 初回取得が済んだら通常の 60 秒間隔に戻す。
+// setInterval だと fetch が遅延した場合に重なるので、chain setTimeout で直列化する。
+function schedulePoll() {
+  const fast = !lastSnapshot || !lastSnapshot.authState || lastSnapshot.authState === 'init';
+  setTimeout(() => {
+    fetchUsage().finally(schedulePoll);
+  }, fast ? 2000 : 60000);
+}
+fetchUsage().finally(schedulePoll);
 setInterval(updateFooter, 5000);
 </script>
 </body>
