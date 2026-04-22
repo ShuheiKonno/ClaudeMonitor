@@ -67,22 +67,23 @@ func getHTML() string {
 
   .content {
     flex: 1;
-    padding: 5px 8px;
+    padding: 6px 8px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
     overflow: hidden;
   }
 
   .row-bar {
+    flex: 1;
     display: flex;
     flex-direction: column;
+    justify-content: center;
     gap: 2px;
     padding: 3px 8px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 4px;
-    flex-shrink: 0;
   }
   .row-top {
     display: flex;
@@ -137,18 +138,18 @@ func getHTML() string {
     align-items: center;
     justify-content: center;
     gap: 4px;
-    height: 22px;
+    height: 26px;
     padding: 0 4px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 4px;
-    font-size: 9px;
+    font-size: 10px;
     color: var(--fg-dim);
     overflow: hidden;
   }
   .status-dot {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     flex-shrink: 0;
     background: rgba(255,255,255,0.2);
@@ -167,7 +168,6 @@ func getHTML() string {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 56px;
   }
 
   /* リンク行 */
@@ -304,7 +304,7 @@ func getHTML() string {
       </div>
       <div class="status-tile" id="status-claude-code">
         <span class="status-dot"></span>
-        <span class="status-name">Claude Code</span>
+        <span class="status-name">Code</span>
       </div>
       <div class="status-tile" id="status-claude-cowork">
         <span class="status-dot"></span>
