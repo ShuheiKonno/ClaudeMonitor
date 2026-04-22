@@ -318,8 +318,8 @@ function applyWindow(prefix, win) {
   pctEl.textContent = pct + '%';
   barEl.style.width = pct + '%';
   barEl.classList.remove('warn', 'crit');
-  if (pct >= 95) barEl.classList.add('crit');
-  else if (pct >= 80) barEl.classList.add('warn');
+  if (pct >= 81) barEl.classList.add('crit');
+  else if (pct >= 51) barEl.classList.add('warn');
   resetEl.textContent = formatResetDateTime(win.resetsAt);
 }
 
