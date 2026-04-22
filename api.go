@@ -127,6 +127,15 @@ func startServer() (int, error) {
 		writeJSON(w, map[string]any{"ok": true})
 	})
 
+	mux.HandleFunc("/api/open-status", func(w http.ResponseWriter, r *http.Request) {
+		go openExternalURL("https://status.claude.com/")
+		writeJSON(w, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, getStatusSnapshot())
+	})
+
 	srv := &http.Server{Handler: mux}
 	go func() {
 		if err := srv.Serve(l); err != nil && err != http.ErrServerClosed {

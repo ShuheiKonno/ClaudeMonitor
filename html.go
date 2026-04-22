@@ -67,22 +67,22 @@ func getHTML() string {
 
   .content {
     flex: 1;
-    padding: 6px 8px;
+    padding: 5px 8px;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
     overflow: hidden;
   }
 
   .row-bar {
-    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 4px 10px;
+    padding: 3px 8px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 4px;
+    flex-shrink: 0;
   }
   .row-top {
     display: flex;
@@ -97,7 +97,7 @@ func getHTML() string {
   }
   .bar {
     flex: 1;
-    height: 16px;
+    height: 12px;
     background: var(--bar-bg);
     border-radius: 3px;
     overflow: hidden;
@@ -119,21 +119,71 @@ func getHTML() string {
     flex-shrink: 0;
   }
   .bar-reset {
-    font-size: 10px;
+    font-size: 9px;
     color: var(--fg-dim);
     font-variant-numeric: tabular-nums;
     text-align: right;
   }
 
+  /* ステータスタイル */
+  .status-row {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .status-tile {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 4px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 9px;
+    color: var(--fg-dim);
+    overflow: hidden;
+  }
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: rgba(255,255,255,0.2);
+  }
+  .status-tile.operational { border-color: rgba(74,222,128,0.25); }
+  .status-tile.operational .status-dot { background: var(--bar-ok); }
+  .status-tile.degraded_performance { border-color: rgba(250,204,21,0.3); }
+  .status-tile.degraded_performance .status-dot { background: var(--bar-warn); }
+  .status-tile.partial_outage { border-color: rgba(249,115,22,0.3); }
+  .status-tile.partial_outage .status-dot { background: #f97316; }
+  .status-tile.major_outage { border-color: rgba(248,113,113,0.35); }
+  .status-tile.major_outage .status-dot { background: var(--bar-crit); }
+  .status-tile.under_maintenance { border-color: rgba(96,165,250,0.3); }
+  .status-tile.under_maintenance .status-dot { background: #60a5fa; }
+  .status-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 56px;
+  }
+
+  /* リンク行 */
+  .links-row {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
   .detail-link {
-    display: block;
-    text-align: center;
+    display: inline-block;
     font-size: 10px;
     color: var(--accent);
     text-decoration: none;
-    padding: 2px 0;
+    padding: 1px 0;
     cursor: pointer;
-    flex-shrink: 0;
   }
   .detail-link:hover { text-decoration: underline; }
 
@@ -142,7 +192,7 @@ func getHTML() string {
     justify-content: space-between;
     font-size: 9px;
     color: var(--fg-dim);
-    padding: 2px 0 0;
+    padding: 1px 0 0;
   }
 
   .auth-banner {
@@ -150,9 +200,10 @@ func getHTML() string {
     background: var(--err-bg);
     border: 1px solid var(--err-border);
     border-radius: 4px;
-    padding: 6px 8px;
+    padding: 5px 8px;
     font-size: 10px;
     line-height: 1.4;
+    flex-shrink: 0;
   }
   .auth-banner.show { display: block; }
   .auth-banner strong { color: #fca5a5; }
@@ -246,7 +297,25 @@ func getHTML() string {
       <div class="bar-reset" id="reset-7d"></div>
     </div>
 
-    <span class="detail-link" id="detail-link">詳細を確認 →</span>
+    <div class="status-row">
+      <div class="status-tile" id="status-claude-ai">
+        <span class="status-dot"></span>
+        <span class="status-name">claude.ai</span>
+      </div>
+      <div class="status-tile" id="status-claude-code">
+        <span class="status-dot"></span>
+        <span class="status-name">Claude Code</span>
+      </div>
+      <div class="status-tile" id="status-claude-cowork">
+        <span class="status-dot"></span>
+        <span class="status-name">Cowork</span>
+      </div>
+    </div>
+
+    <div class="links-row">
+      <span class="detail-link" id="detail-link">詳細を確認 →</span>
+      <span class="detail-link" id="status-link">ステータス →</span>
+    </div>
 
     <div class="footer">
       <span id="account-label"></span>
@@ -299,7 +368,7 @@ function formatResetDateTime(iso) {
   const w = JP_WEEKDAYS[t.getDay()];
   const hh = String(t.getHours()).padStart(2, '0');
   const mm = String(t.getMinutes()).padStart(2, '0');
-  return 'リセット日時: ' + mo + '月' + d + '日（' + w + '）' + hh + ':' + mm;
+  return 'リセット: ' + mo + '月' + d + '日（' + w + '）' + hh + ':' + mm;
 }
 
 function applyWindow(prefix, win) {
@@ -307,7 +376,6 @@ function applyWindow(prefix, win) {
   const barEl = document.getElementById('bar-' + prefix);
   const resetEl = document.getElementById('reset-' + prefix);
   if (!win || typeof win.utilization !== 'number' || (win.utilization === 0 && !win.resetsAt)) {
-    // サーバが 0% を返すこともあるが resetsAt が無ければ未取得扱い
     pctEl.textContent = '—';
     barEl.style.width = '0%';
     barEl.classList.remove('warn', 'crit');
@@ -398,6 +466,40 @@ function updateFooter() {
   }
 }
 
+// ステータスタイル ID マッピング
+const STATUS_TILE_IDS = {
+  'claude.ai':     'status-claude-ai',
+  'Claude Code':   'status-claude-code',
+  'Claude Cowork': 'status-claude-cowork',
+};
+
+function renderStatusTiles(services) {
+  if (!services) return;
+  for (const svc of services) {
+    const id = STATUS_TILE_IDS[svc.name];
+    if (!id) continue;
+    const tile = document.getElementById(id);
+    if (!tile) continue;
+    // Remove all status classes then apply new one
+    tile.classList.remove(
+      'operational','degraded_performance','partial_outage','major_outage','under_maintenance'
+    );
+    if (svc.status && svc.status !== 'unknown') {
+      tile.classList.add(svc.status);
+    }
+  }
+}
+
+async function fetchStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const snap = await res.json();
+    renderStatusTiles(snap.services);
+  } catch (e) {
+    // silently fail — tiles stay gray (unknown)
+  }
+}
+
 // --- タイトルバーのボタン ---
 document.getElementById('btn-close').addEventListener('click', () => {
   fetch('/api/close', { method: 'GET' });
@@ -407,10 +509,9 @@ document.getElementById('btn-refresh').addEventListener('click', async () => {
   btn.disabled = true;
   btn.style.opacity = '0.5';
   try {
-    // /api/refresh は同期でフェッチ → 最新 snapshot を返す。
-    // 並行クリックは refreshMu で直列化されるためボタンも disabled にして重複抑止。
-    const res = await fetch('/api/refresh');
-    applySnapshot(await res.json());
+    await fetch('/api/refresh');
+    await fetchUsage();
+    fetchStatus();
   } catch (e) {
     document.getElementById('updated').textContent = '取得エラー';
   } finally {
@@ -421,6 +522,10 @@ document.getElementById('btn-refresh').addEventListener('click', async () => {
 document.getElementById('detail-link').addEventListener('click', (e) => {
   e.preventDefault();
   fetch('/api/open-usage');
+});
+document.getElementById('status-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  fetch('/api/open-status');
 });
 
 // --- 設定パネル ---
@@ -475,7 +580,6 @@ document.addEventListener('mouseup', () => {
 
 // 起動直後は authState=="init" の空スナップショットを返すので短間隔でポーリングし、
 // 初回取得が済んだら通常の 60 秒間隔に戻す。
-// setInterval だと fetch が遅延した場合に重なるので、chain setTimeout で直列化する。
 function schedulePoll() {
   const fast = !lastSnapshot || !lastSnapshot.authState || lastSnapshot.authState === 'init';
   setTimeout(() => {
@@ -483,6 +587,8 @@ function schedulePoll() {
   }, fast ? 2000 : 60000);
 }
 fetchUsage().finally(schedulePoll);
+fetchStatus();
+setInterval(fetchStatus, 300000);
 setInterval(updateFooter, 5000);
 </script>
 </body>

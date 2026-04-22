@@ -56,7 +56,7 @@ const (
 	MONITOR_DEFAULTTONEAREST = 0x00000002
 
 	windowWidth  = 230
-	windowHeight = 180
+	windowHeight = 210
 )
 
 var windowHandle uintptr
