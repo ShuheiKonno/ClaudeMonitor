@@ -302,13 +302,13 @@ func getHTML() string {
         <span class="status-dot"></span>
         <span class="status-name">claude.ai</span>
       </div>
-      <div class="status-tile" id="status-claude-code">
-        <span class="status-dot"></span>
-        <span class="status-name">Code</span>
-      </div>
       <div class="status-tile" id="status-claude-cowork">
         <span class="status-dot"></span>
         <span class="status-name">Cowork</span>
+      </div>
+      <div class="status-tile" id="status-claude-code">
+        <span class="status-dot"></span>
+        <span class="status-name">Code</span>
       </div>
     </div>
 
