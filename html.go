@@ -214,6 +214,37 @@ func getHTML() string {
     font-size: 10px;
   }
 
+  .status-banner {
+    display: none;
+    background: rgba(250,204,21,0.12);
+    border: 1px solid rgba(250,204,21,0.4);
+    border-radius: 4px;
+    padding: 4px 7px;
+    font-size: 10px;
+    line-height: 1.35;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .status-banner.show { display: block; }
+  .status-banner.major { background: rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.45); }
+  .status-banner.critical { background: rgba(248,113,113,0.15); border-color: rgba(248,113,113,0.45); }
+  .status-banner .sb-title {
+    font-weight: 600;
+    color: #fcd34d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .status-banner.major .sb-title { color: #fdba74; }
+  .status-banner.critical .sb-title { color: #fca5a5; }
+  .status-banner .sb-sub {
+    color: var(--fg-dim);
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .status-banner .sb-sub .sb-more { flex-shrink: 0; }
+
   /* 設定パネル */
   .settings {
     display: none;
@@ -277,6 +308,14 @@ func getHTML() string {
     <div class="auth-banner" id="auth-banner">
       <strong id="auth-banner-title">認証エラー</strong>
       <div id="auth-banner-body">ターミナルで <code>claude</code> を実行してログインしてください。</div>
+    </div>
+
+    <div class="status-banner" id="status-banner" title="status.claude.com を開く">
+      <div class="sb-title" id="status-banner-title"></div>
+      <div class="sb-sub">
+        <span id="status-banner-impact"></span>
+        <span class="sb-more" id="status-banner-more"></span>
+      </div>
     </div>
 
     <div class="row-bar">
@@ -490,11 +529,46 @@ function renderStatusTiles(services) {
   }
 }
 
+const INCIDENT_IMPACT_LABEL = {
+  minor: '軽微な障害',
+  major: '重大な障害',
+  critical: '致命的な障害',
+  maintenance: 'メンテナンス中',
+  none: '',
+};
+
+function renderStatusBanner(snap) {
+  const banner = document.getElementById('status-banner');
+  const titleEl = document.getElementById('status-banner-title');
+  const impactEl = document.getElementById('status-banner-impact');
+  const moreEl = document.getElementById('status-banner-more');
+  if (!banner) return;
+  const incidents = (snap && snap.incidents) || [];
+  if (incidents.length === 0) {
+    banner.classList.remove('show', 'major', 'critical');
+    return;
+  }
+  // Pick the worst incident by impact.
+  const weight = { critical: 4, major: 3, minor: 2, maintenance: 1, none: 0 };
+  let head = incidents[0];
+  for (const inc of incidents) {
+    if ((weight[inc.impact] || 0) > (weight[head.impact] || 0)) head = inc;
+  }
+  titleEl.textContent = head.name || '進行中のインシデント';
+  impactEl.textContent = INCIDENT_IMPACT_LABEL[head.impact] || head.impact || '';
+  moreEl.textContent = incidents.length > 1 ? '他' + (incidents.length - 1) + '件 →' : '詳細 →';
+  banner.classList.remove('major', 'critical');
+  if (head.impact === 'major') banner.classList.add('major');
+  else if (head.impact === 'critical') banner.classList.add('critical');
+  banner.classList.add('show');
+}
+
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
     const snap = await res.json();
     renderStatusTiles(snap.services);
+    renderStatusBanner(snap);
   } catch (e) {
     // silently fail — tiles stay gray (unknown)
   }
@@ -525,6 +599,9 @@ document.getElementById('detail-link').addEventListener('click', (e) => {
 });
 document.getElementById('status-link').addEventListener('click', (e) => {
   e.preventDefault();
+  fetch('/api/open-status');
+});
+document.getElementById('status-banner').addEventListener('click', () => {
   fetch('/api/open-status');
 });
 
