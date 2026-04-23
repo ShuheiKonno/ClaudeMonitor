@@ -74,6 +74,8 @@ func startServer() (int, error) {
 		// 「更新」ボタンを押した直後に古い値を返さないために重要。
 		// refreshMu により並行呼び出しは直列化（重複フェッチ防止）。
 		refreshUsage()
+		// ステータスキャッシュも失効させ、次の /api/status で再フェッチさせる。
+		invalidateStatusCache()
 		writeJSON(w, getUsageSnapshot())
 	})
 
