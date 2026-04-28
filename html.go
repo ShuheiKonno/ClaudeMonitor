@@ -425,8 +425,9 @@ function applyWindow(prefix, win) {
   pctEl.textContent = pct + '%';
   barEl.style.width = pct + '%';
   barEl.classList.remove('warn', 'crit');
+  // 0-60% 緑 (default) / 61-80% 黄 (warn) / 81-100% 赤 (crit)
   if (pct >= 81) barEl.classList.add('crit');
-  else if (pct >= 51) barEl.classList.add('warn');
+  else if (pct >= 61) barEl.classList.add('warn');
   resetEl.textContent = formatResetDateTime(win.resetsAt);
 }
 
