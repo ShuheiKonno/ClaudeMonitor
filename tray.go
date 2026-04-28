@@ -396,23 +396,63 @@ func drawTrayIconImage(pct5h, pct7d int) *image.RGBA {
 	}
 
 	val := pct5h
-	if val > 99 {
-		val = 99
+	if val < 0 {
+		val = 0
 	}
-	text := strconv.Itoa(val)
-	drawer := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(fgColor),
-		Face: basicfont.Face7x13,
+	if val > 100 {
+		val = 100
 	}
-	w := drawer.MeasureString(text).Round()
-	x := (trayIconSize - w) / 2
-	if x < 0 {
-		x = 0
+	if val >= 100 {
+		// 7x13 では 3 桁が 16px に収まらないため、100% 専用に 3x5 ビットマップで "100" を描画する。
+		drawTrayCompact100(img, fgColor)
+	} else {
+		text := strconv.Itoa(val)
+		drawer := &font.Drawer{
+			Dst:  img,
+			Src:  image.NewUniform(fgColor),
+			Face: basicfont.Face7x13,
+		}
+		w := drawer.MeasureString(text).Round()
+		x := (trayIconSize - w) / 2
+		if x < 0 {
+			x = 0
+		}
+		drawer.Dot = fixed.P(x, 12)
+		drawer.DrawString(text)
 	}
-	drawer.Dot = fixed.P(x, 12)
-	drawer.DrawString(text)
 	return img
+}
+
+// drawTrayCompact100 は 16px トレイで "100" を読める形に詰めるための 3x5 専用描画。
+// 各桁 3x5 + 1px gap で計 11px、トレイ中央に配置する。
+func drawTrayCompact100(img *image.RGBA, c color.RGBA) {
+	const digitW, digitH, gap = 3, 5, 1
+	one := "" +
+		".X." +
+		"XX." +
+		".X." +
+		".X." +
+		"XXX"
+	zero := "" +
+		"XXX" +
+		"X.X" +
+		"X.X" +
+		"X.X" +
+		"XXX"
+	glyphs := []string{one, zero, zero}
+	totalW := digitW*len(glyphs) + gap*(len(glyphs)-1)
+	startX := (trayIconSize - totalW) / 2
+	startY := (trayIconSize - digitH) / 2
+	for gi, g := range glyphs {
+		ox := startX + gi*(digitW+gap)
+		for row := 0; row < digitH; row++ {
+			for col := 0; col < digitW; col++ {
+				if g[row*digitW+col] == 'X' {
+					blendTray(img, ox+col, startY+row, c, 1)
+				}
+			}
+		}
+	}
 }
 
 func generateTrayIcon(pct5h, pct7d int) uintptr {
