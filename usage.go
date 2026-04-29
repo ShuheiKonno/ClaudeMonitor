@@ -64,7 +64,9 @@ func refreshUsage() {
 		refreshNotifyMu.Unlock()
 	}()
 
-	authWebViewInst.Dispatch(func() {
+	// 主 WebView の Dispatch キューだけが Run でドレインされるため必ずここを通す。
+	// 両 WebView は同一スレッドにあるので auth.Eval を main 経由で呼んで問題ない。
+	uiDispatch(func() {
 		authWebViewInst.Eval("window.__fetchClaudeUsage && window.__fetchClaudeUsage()")
 	})
 

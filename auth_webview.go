@@ -44,7 +44,25 @@ var (
 	authWebViewHandle  uintptr
 	authWebViewInst    webview2.WebView
 	authWebViewVisible atomic.Bool
+
+	// mainWebViewInst は主 UI WebView。auth 側で Dispatch すると関数が
+	// 実行されない (go-webview2 の Run ループは自分の dispatchq だけを
+	// ドレインするため) ので、UI スレッドへ寄せる用途は全てこちらの
+	// Dispatch を使う。両 WebView は同一スレッドにあるので、main 経由で
+	// auth の Win32 / Eval / Navigate を呼ぶのは安全。
+	mainWebViewInst webview2.WebView
 )
+
+// uiDispatch は UI (主 WebView) スレッドへ関数を寄せる。
+// 主 WebView 未生成 (起動最序盤) の場合はインライン実行する
+// (起動経路では既に主 goroutine 上にいるため安全)。
+func uiDispatch(f func()) {
+	if mainWebViewInst == nil {
+		f()
+		return
+	}
+	mainWebViewInst.Dispatch(f)
+}
 
 // rawClaudeUsagePayload は JS が JSON.stringify して Bind に渡してくる構造体。
 // claude.ai の /usage と /edge-api/bootstrap/.../app_start から JS 側で抽出済み。
@@ -204,22 +222,19 @@ func moveAuthOffscreenInline() {
 		500, 700, SWP_NOZORDER|SWP_FRAMECHANGED)
 }
 
-// moveAuthOffscreen は別スレッドからの呼び出し向け。Dispatch で UI スレッドに寄せる。
+// moveAuthOffscreen は別スレッドからの呼び出し向け。UI スレッドに寄せる。
 func moveAuthOffscreen() {
-	if authWebViewInst == nil {
-		return
-	}
-	authWebViewInst.Dispatch(moveAuthOffscreenInline)
+	uiDispatch(moveAuthOffscreenInline)
 }
 
 // showAuthWebView はログインを促すために補助ウィンドウをオンスクリーンへ復帰させる。
-// 既に表示中なら前面に上げるだけ。Win32 呼び出しは WebView UI スレッドに寄せる。
+// 既に表示中なら前面に上げるだけ。Win32 呼び出しは UI スレッドに寄せる。
 func showAuthWebView() {
 	if authWebViewHandle == 0 || authWebViewInst == nil {
 		return
 	}
 	wasHidden := authWebViewVisible.CompareAndSwap(false, true)
-	authWebViewInst.Dispatch(func() {
+	uiDispatch(func() {
 		if !wasHidden {
 			procSetForegroundWindow.Call(authWebViewHandle)
 			return

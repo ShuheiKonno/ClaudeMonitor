@@ -306,6 +306,11 @@ func main() {
 	}
 	defer w.Destroy()
 
+	// 主 WebView の Dispatch キューだけが w.Run() でドレインされるため、
+	// auth WebView 用の Dispatch も全てここを通す必要がある (同一スレッドなので
+	// 実体としては安全)。詳細は uiDispatch のコメント参照。
+	mainWebViewInst = w
+
 	// claude.ai 認証 + 取得用の補助 WebView をオフスクリーンに立ち上げる。
 	// 主 UI WebView と同スレッド (LockOSThread 済み) で動き、メッセージは
 	// w.Run() の単一メッセージループから両ウィンドウへディスパッチされる。
