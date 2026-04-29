@@ -1,0 +1,337 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
+	"unsafe"
+
+	"github.com/jchv/go-webview2"
+)
+
+// === claude.ai 用補助 WebView ===
+//
+// 主 UI 用 WebView (127.0.0.1) とは別ウィンドウとして claude.ai を抱える。
+// 通常は -32000,-32000 のオフスクリーン位置に置き、JS を Eval して
+// /api/organizations/{orgId}/usage と /edge-api/bootstrap/.../app_start を叩く。
+// Cookie はこの WebView の DataPath に保持されるため、ユーザーは初回のみ
+// アプリ内でログインすれば以降は自動再認証される。
+//
+// 設計判断:
+//   - SW_HIDE は使わずオフスクリーンに置く: 隠し窓だと WebView2 が
+//     setInterval / requestAnimationFrame をスロットルする可能性があるため
+//   - WS_EX_TOOLWINDOW でタスクバーから消す
+//   - ログイン要求時のみオンスクリーンへ復帰 (showAuthWebView)
+
+const (
+	authWindowTitle = "ClaudeMonitor Auth"
+
+	WS_EX_APPWINDOW  = 0x00040000
+	WS_EX_TOOLWINDOW = 0x00000080
+)
+
+// 定数で書くと const 評価で uintptr オーバーフローになるため var で保持。
+var (
+	authOffscreenX int32 = -32000
+	authOffscreenY int32 = -32000
+)
+
+var (
+	authWebViewHandle  uintptr
+	authWebViewInst    webview2.WebView
+	authWebViewVisible atomic.Bool
+)
+
+// rawClaudeUsagePayload は JS が JSON.stringify して Bind に渡してくる構造体。
+// claude.ai の /usage と /edge-api/bootstrap/.../app_start から JS 側で抽出済み。
+type rawClaudeUsagePayload struct {
+	FiveHour      *rawClaudeWindow `json:"fiveHour"`
+	SevenDay      *rawClaudeWindow `json:"sevenDay"`
+	Email         string           `json:"email"`
+	DisplayName   string           `json:"displayName"`
+	Capabilities  []string         `json:"capabilities"`
+	RateLimitTier string           `json:"rateLimitTier"`
+	BillingType   string           `json:"billingType"`
+}
+
+type rawClaudeWindow struct {
+	Utilization float64 `json:"utilization"`
+	ResetsAt    *string `json:"resetsAt"`
+}
+
+// startAuthWebView は補助 WebView を生成し、オフスクリーン配置 + JS 注入を行う。
+// 必ず w.Run() を呼ぶ前 (LockOSThread 済み主 goroutine) に呼ぶこと。
+func startAuthWebView(dataPath string) {
+	aw := webview2.NewWithOptions(webview2.WebViewOptions{
+		Debug:    false,
+		DataPath: dataPath,
+		WindowOptions: webview2.WindowOptions{
+			Title:  authWindowTitle,
+			Width:  500,
+			Height: 700,
+			Center: false,
+		},
+	})
+	if aw == nil {
+		fmt.Fprintln(os.Stderr, "[auth] WebView 生成失敗")
+		return
+	}
+	authWebViewInst = aw
+
+	titlePtr, _ := syscall.UTF16PtrFromString(authWindowTitle)
+	hwnd, _, _ := procFindWindow.Call(0, uintptr(unsafe.Pointer(titlePtr)))
+	if hwnd == 0 {
+		fmt.Fprintln(os.Stderr, "[auth] HWND 取得失敗")
+		return
+	}
+	authWebViewHandle = hwnd
+
+	// この呼び出しは主 goroutine (LockOSThread 済み) から起きるため、
+	// Dispatch を経由せず直接 Win32 を叩いてよい。これで起動時に
+	// auth ウィンドウが一瞬画面に出る "フラッシュ" を回避できる。
+	moveAuthOffscreenInline()
+
+	if err := aw.Bind("__postUsageData", func(jsonStr string) {
+		var p rawClaudeUsagePayload
+		if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
+			updateUsageError("network_error", fmt.Sprintf("レスポンスパース失敗: %v", err))
+			signalRefreshDone()
+			return
+		}
+		applyUsagePayload(p)
+		signalRefreshDone()
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "[auth] Bind __postUsageData 失敗:", err)
+	}
+	if err := aw.Bind("__postLoginRequired", func(reason string) {
+		updateUsageError("needs_login", reason)
+		signalRefreshDone()
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "[auth] Bind __postLoginRequired 失敗:", err)
+	}
+	if err := aw.Bind("__postFetchError", func(msg string) {
+		updateUsageError("network_error", msg)
+		signalRefreshDone()
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "[auth] Bind __postFetchError 失敗:", err)
+	}
+
+	aw.Init(authFetcherScript)
+	aw.Navigate("https://claude.ai/settings/usage")
+}
+
+// authFetcherScript は claude.ai のページコンテキストで動く取得ループ。
+// __fetchClaudeUsage を window に公開し、Go 側から Eval で呼び出せるようにする。
+const authFetcherScript = `
+(function() {
+  async function fetchClaudeUsage() {
+    try {
+      const orgMatch = document.cookie.match(/lastActiveOrg=([^;]+)/);
+      if (!orgMatch) {
+        // 通常はログインページにリダイレクトされている状態
+        window.__postLoginRequired && window.__postLoginRequired('lastActiveOrg cookie 未取得 (未ログイン)');
+        return;
+      }
+      const orgId = decodeURIComponent(orgMatch[1]);
+      const headers = {'Content-Type': 'application/json'};
+      const [usageR, bootR] = await Promise.all([
+        fetch('/api/organizations/' + orgId + '/usage', {credentials: 'include', headers}),
+        fetch('/edge-api/bootstrap/' + orgId + '/app_start?statsig_hashing_algorithm=djb2&growthbook_format=sdk&include_system_prompts=false', {credentials: 'include', headers})
+      ]);
+      if (usageR.status === 401 || usageR.status === 403) {
+        window.__postLoginRequired && window.__postLoginRequired('Cookie 失効 (status=' + usageR.status + ')');
+        return;
+      }
+      if (!usageR.ok) {
+        window.__postFetchError && window.__postFetchError('usage fetch failed: status=' + usageR.status);
+        return;
+      }
+      const usage = await usageR.json();
+      let email = '', display = '', caps = [], tier = '', billing = '';
+      if (bootR.ok) {
+        try {
+          const boot = await bootR.json();
+          email = (boot.account && boot.account.email_address) || '';
+          display = (boot.account && (boot.account.display_name || boot.account.full_name)) || '';
+          const memberships = (boot.account && boot.account.memberships) || [];
+          const m = memberships.find(function(x) { return x && x.organization && x.organization.uuid === orgId; });
+          if (m && m.organization) {
+            caps = m.organization.capabilities || [];
+            tier = m.organization.rate_limit_tier || '';
+            billing = m.organization.billing_type || '';
+          }
+        } catch (e) { /* bootstrap パース失敗は致命傷ではない */ }
+      }
+      const payload = {
+        fiveHour: usage.five_hour ? {utilization: usage.five_hour.utilization, resetsAt: usage.five_hour.resets_at} : null,
+        sevenDay: usage.seven_day ? {utilization: usage.seven_day.utilization, resetsAt: usage.seven_day.resets_at} : null,
+        email: email,
+        displayName: display,
+        capabilities: caps,
+        rateLimitTier: tier,
+        billingType: billing
+      };
+      window.__postUsageData && window.__postUsageData(JSON.stringify(payload));
+    } catch (e) {
+      window.__postFetchError && window.__postFetchError(String((e && e.message) || e));
+    }
+  }
+  window.__fetchClaudeUsage = fetchClaudeUsage;
+  // ナビゲーション直後はリダイレクトと cookie 反映を待つために 1.5s 遅延
+  setTimeout(fetchClaudeUsage, 1500);
+  // バックアップタイマー (Go 側 ticker と二重保険)
+  setInterval(fetchClaudeUsage, 5 * 60 * 1000);
+})();
+`
+
+// moveAuthOffscreenInline は補助ウィンドウをタスクバーから消し、画面外へ移動する。
+// Win32 ウィンドウ操作は WebView UI スレッド上で同期実行する。
+// startAuthWebView の初期化時など、既に主 goroutine にいる場面で使用する。
+func moveAuthOffscreenInline() {
+	if authWebViewHandle == 0 {
+		return
+	}
+	gwlExStyle := int32(GWL_EXSTYLE)
+	exStyle, _, _ := procGetWindowLong.Call(authWebViewHandle, uintptr(gwlExStyle))
+	newExStyle := (exStyle &^ WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
+	procSetWindowLong.Call(authWebViewHandle, uintptr(gwlExStyle), newExStyle)
+	procSetWindowPos.Call(authWebViewHandle, 0,
+		uintptr(uint32(authOffscreenX)), uintptr(uint32(authOffscreenY)),
+		500, 700, SWP_NOZORDER|SWP_FRAMECHANGED)
+}
+
+// moveAuthOffscreen は別スレッドからの呼び出し向け。Dispatch で UI スレッドに寄せる。
+func moveAuthOffscreen() {
+	if authWebViewInst == nil {
+		return
+	}
+	authWebViewInst.Dispatch(moveAuthOffscreenInline)
+}
+
+// showAuthWebView はログインを促すために補助ウィンドウをオンスクリーンへ復帰させる。
+// 既に表示中なら前面に上げるだけ。Win32 呼び出しは WebView UI スレッドに寄せる。
+func showAuthWebView() {
+	if authWebViewHandle == 0 || authWebViewInst == nil {
+		return
+	}
+	wasHidden := authWebViewVisible.CompareAndSwap(false, true)
+	authWebViewInst.Dispatch(func() {
+		if !wasHidden {
+			procSetForegroundWindow.Call(authWebViewHandle)
+			return
+		}
+		gwlExStyle := int32(GWL_EXSTYLE)
+		exStyle, _, _ := procGetWindowLong.Call(authWebViewHandle, uintptr(gwlExStyle))
+		newExStyle := (exStyle &^ WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+		procSetWindowLong.Call(authWebViewHandle, uintptr(gwlExStyle), newExStyle)
+		procSetWindowPos.Call(authWebViewHandle, 0, 200, 100, 800, 800, SWP_NOZORDER|SWP_FRAMECHANGED)
+		procShowWindow.Call(authWebViewHandle, SW_SHOW)
+		procSetForegroundWindow.Call(authWebViewHandle)
+		authWebViewInst.Navigate("https://claude.ai/login")
+	})
+}
+
+// hideAuthWebView はログイン完了後にオフスクリーンへ戻す。
+func hideAuthWebView() {
+	if authWebViewHandle == 0 {
+		return
+	}
+	if !authWebViewVisible.CompareAndSwap(true, false) {
+		return
+	}
+	moveAuthOffscreen()
+}
+
+// applyUsagePayload は JS から受け取った正常レスポンスをスナップショットへ反映する。
+func applyUsagePayload(p rawClaudeUsagePayload) {
+	snap := UsageSnapshot{
+		FiveHour:         mapClaudeWindow(p.FiveHour),
+		SevenDay:         mapClaudeWindow(p.SevenDay),
+		Email:            p.Email,
+		DisplayName:      p.DisplayName,
+		SubscriptionType: deriveSubscriptionType(p.Capabilities, p.RateLimitTier),
+		AuthState:        "ok",
+		UpdatedAt:        time.Now(),
+	}
+	usageMu.Lock()
+	cachedUsage = snap
+	usageMu.Unlock()
+
+	if authWebViewVisible.Load() {
+		hideAuthWebView()
+	}
+	updateTrayFromSnapshot()
+}
+
+func mapClaudeWindow(w *rawClaudeWindow) UsageWindow {
+	if w == nil {
+		return UsageWindow{}
+	}
+	out := UsageWindow{Utilization: w.Utilization}
+	if w.ResetsAt != nil && *w.ResetsAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, *w.ResetsAt); err == nil {
+			out.ResetsAt = &t
+		} else if t, err := time.Parse(time.RFC3339, *w.ResetsAt); err == nil {
+			out.ResetsAt = &t
+		}
+	}
+	return out
+}
+
+// deriveSubscriptionType は capabilities と rate_limit_tier から表示用文字列を導く。
+// 例: ["claude_max", "chat"] + "default_claude_max_20x" → "Claude Max 20x"
+func deriveSubscriptionType(caps []string, tier string) string {
+	has := func(s string) bool {
+		for _, c := range caps {
+			if c == s {
+				return true
+			}
+		}
+		return false
+	}
+	base := ""
+	switch {
+	case has("claude_max"):
+		base = "Claude Max"
+	case has("claude_pro"):
+		base = "Claude Pro"
+	case has("claude_team") || has("team"):
+		base = "Claude Team"
+	case has("api"), has("api_individual"):
+		base = "API"
+	default:
+		if len(caps) > 0 {
+			base = caps[0]
+		}
+	}
+	if suffix := extractTierMultiplier(tier); suffix != "" {
+		if base != "" {
+			return base + " " + suffix
+		}
+		return suffix
+	}
+	return base
+}
+
+// extractTierMultiplier は "default_claude_max_20x" → "20x" のように
+// rate_limit_tier 文字列の末尾から N桁数字+x のサフィックスを抽出する。
+// マッチしなければ空文字。
+func extractTierMultiplier(tier string) string {
+	if tier == "" {
+		return ""
+	}
+	last := tier[strings.LastIndex(tier, "_")+1:]
+	if len(last) < 2 || last[len(last)-1] != 'x' {
+		return ""
+	}
+	for _, ch := range last[:len(last)-1] {
+		if ch < '0' || ch > '9' {
+			return ""
+		}
+	}
+	return last
+}

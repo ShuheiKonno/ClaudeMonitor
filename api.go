@@ -134,6 +134,13 @@ func startServer() (int, error) {
 		writeJSON(w, map[string]any{"ok": true})
 	})
 
+	// 補助 WebView をオンスクリーンに復帰させ、claude.ai のログインページを表示する。
+	// バナーの「ログイン」ボタン or トレイの「Claude にログイン…」から呼ばれる。
+	mux.HandleFunc("/api/relogin", func(w http.ResponseWriter, r *http.Request) {
+		go showAuthWebView()
+		writeJSON(w, map[string]any{"ok": true})
+	})
+
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, getStatusSnapshot())
 	})
