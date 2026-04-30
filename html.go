@@ -213,6 +213,17 @@ func getHTML() string {
     border-radius: 2px;
     font-size: 10px;
   }
+  .auth-banner button {
+    margin-top: 4px;
+    padding: 3px 10px;
+    font-size: 10px;
+    background: rgba(255,255,255,0.12);
+    color: var(--fg);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .auth-banner button:hover { background: rgba(255,255,255,0.2); }
 
   .status-banner {
     display: none;
@@ -307,7 +318,8 @@ func getHTML() string {
   <div class="content" id="main-view">
     <div class="auth-banner" id="auth-banner">
       <strong id="auth-banner-title">認証エラー</strong>
-      <div id="auth-banner-body">ターミナルで <code>claude</code> を実行してログインしてください。</div>
+      <div id="auth-banner-body"></div>
+      <button id="auth-banner-action" type="button" style="display:none;">ログイン</button>
     </div>
 
     <div class="status-banner" id="status-banner" title="status.claude.com を開く">
@@ -438,19 +450,18 @@ function renderAuthBanner(snap) {
   const banner = document.getElementById('auth-banner');
   const titleEl = document.getElementById('auth-banner-title');
   const bodyEl = document.getElementById('auth-banner-body');
+  const btn = document.getElementById('auth-banner-action');
   if (!snap || snap.authState === 'ok' || snap.authState === 'init') {
     banner.classList.remove('show');
     return;
   }
   banner.classList.add('show');
+  btn.style.display = 'none';
   switch (snap.authState) {
-    case 'missing':
+    case 'needs_login':
       titleEl.textContent = '未ログイン';
-      bodyEl.innerHTML = 'ターミナルで <code>claude</code> を実行してログインしてください。';
-      break;
-    case 'expired':
-      titleEl.textContent = 'トークン期限切れ';
-      bodyEl.innerHTML = 'ターミナルで <code>claude</code> を実行して再ログインしてください。';
+      bodyEl.textContent = 'Claude にサインインしてください。';
+      btn.style.display = 'inline-block';
       break;
     case 'network_error':
       titleEl.textContent = '取得失敗';
@@ -461,6 +472,12 @@ function renderAuthBanner(snap) {
       bodyEl.textContent = snap.lastError || '';
   }
 }
+
+document.getElementById('auth-banner-action').addEventListener('click', async () => {
+  try {
+    await fetch('/api/relogin', {method: 'POST'});
+  } catch (e) {}
+});
 
 function renderAccount(snap) {
   const label = document.getElementById('account-label');

@@ -1,14 +1,11 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 )
-
 
 // UsageWindow は 1 つの使用率ウィンドウ（%）と次回リセット時刻。
 type UsageWindow struct {
@@ -26,7 +23,9 @@ type UsageSnapshot struct {
 	DisplayName      string `json:"displayName"`
 	SubscriptionType string `json:"subscriptionType"`
 
-	// AuthState: "ok" | "expired" | "missing" | "network_error" | "init"
+	// AuthState: "ok" | "needs_login" | "network_error" | "init"
+	// "needs_login" は claude.ai の Cookie が無い／失効で、
+	// 補助 WebView を可視化してユーザーにログインさせる必要がある状態。
 	AuthState string    `json:"authState"`
 	LastError string    `json:"lastError,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -35,82 +34,67 @@ type UsageSnapshot struct {
 var (
 	usageMu     sync.RWMutex
 	cachedUsage UsageSnapshot
-	// refreshMu は並行する refreshUsage 呼び出しを直列化して API への
-	// 重複フェッチを防ぐ（ticker / 手動更新 / トレイ更新 が同時に走っても 1 回にまとめる）。
+	// refreshMu は並行する refreshUsage 呼び出しを直列化する。
 	refreshMu sync.Mutex
+
+	// refreshNotify は同期的な /api/refresh 呼び出しが Bind コールバックの完了を待つためのチャンネル。
+	// refreshNotifyMu で保護され、refreshUsage 開始時に作成・終了時に nil 化される。
+	refreshNotifyMu sync.Mutex
+	refreshNotify   chan struct{}
 )
 
-// refreshUsage は認証ファイル読み込み → API 呼び出しを同期実行する。
-// ネットワーク失敗時は直近の Utilization と UpdatedAt を保持したまま AuthState のみ更新する
-// （UpdatedAt は「最終成功フェッチ時刻」の意味を保つ — 失敗時に now で上書きしない）。
+// refreshUsage は補助 WebView の JS に取得をリクエストし、Bind コールバック完了まで待つ。
+// 並行呼び出しは refreshMu で直列化される。タイムアウトは 15 秒。
+// 補助 WebView がまだ生成されていない (起動初期) ときは何もしない。
 func refreshUsage() {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 
-	auth, err := loadAuthData()
-	if err != nil {
-		updateSnapshotErr("missing", fmt.Sprintf("認証情報を取得できません: %v", err))
-		return
-	}
-	if auth.isExpired() {
-		updateSnapshotErr("expired", fmt.Sprintf("OAuth トークンの期限切れ（%s）", auth.ExpiresAt.Local().Format("2006-01-02 15:04")))
+	if authWebViewInst == nil {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	usage, err := fetchUsage(ctx, auth)
-	if err != nil {
-		state := "network_error"
-		if errors.Is(err, ErrAuthExpired) {
-			state = "expired"
-		}
-		// アカウント情報だけは更新しておく（UI の宛先表示用）。
-		// UpdatedAt は成功時のスナップショット時刻を保持する（失敗時は更新しない）。
-		usageMu.Lock()
-		cachedUsage.Email = auth.Email
-		cachedUsage.DisplayName = auth.DisplayName
-		cachedUsage.SubscriptionType = auth.SubscriptionType
-		cachedUsage.AuthState = state
-		cachedUsage.LastError = err.Error()
-		usageMu.Unlock()
-		updateTrayFromSnapshot()
-		return
-	}
+	ch := make(chan struct{}, 1)
+	refreshNotifyMu.Lock()
+	refreshNotify = ch
+	refreshNotifyMu.Unlock()
+	defer func() {
+		refreshNotifyMu.Lock()
+		refreshNotify = nil
+		refreshNotifyMu.Unlock()
+	}()
 
-	snap := UsageSnapshot{
-		FiveHour:         mapWindow(usage.FiveHour),
-		SevenDay:         mapWindow(usage.SevenDay),
-		Email:            auth.Email,
-		DisplayName:      auth.DisplayName,
-		SubscriptionType: auth.SubscriptionType,
-		AuthState:        "ok",
-		UpdatedAt:        time.Now(),
+	// 主 WebView の Dispatch キューだけが Run でドレインされるため必ずここを通す。
+	// 両 WebView は同一スレッドにあるので auth.Eval を main 経由で呼んで問題ない。
+	uiDispatch(func() {
+		authWebViewInst.Eval("window.__fetchClaudeUsage && window.__fetchClaudeUsage()")
+	})
+
+	select {
+	case <-ch:
+	case <-time.After(15 * time.Second):
+		updateUsageError("network_error", "fetch timeout")
 	}
-	usageMu.Lock()
-	cachedUsage = snap
-	usageMu.Unlock()
-	// 取得完了後にトレイアイコンも反映（30秒 ticker の到来を待たない）。
-	// トレイ未初期化ならガードにより no-op。
-	updateTrayFromSnapshot()
 }
 
-func mapWindow(raw *rawUsageWindow) UsageWindow {
-	if raw == nil {
-		return UsageWindow{}
+// signalRefreshDone は Bind コールバックが完了した時に呼ぶ。
+// refreshUsage が select 待ち中ならアンブロックする。
+func signalRefreshDone() {
+	refreshNotifyMu.Lock()
+	ch := refreshNotify
+	refreshNotifyMu.Unlock()
+	if ch == nil {
+		return
 	}
-	u := UsageWindow{Utilization: raw.Utilization}
-	if raw.ResetsAt != nil && *raw.ResetsAt != "" {
-		if t, err := time.Parse(time.RFC3339, *raw.ResetsAt); err == nil {
-			u.ResetsAt = &t
-		}
+	select {
+	case ch <- struct{}{}:
+	default:
 	}
-	return u
 }
 
-// updateSnapshotErr は認証失敗などデータ取得以前のエラーを記録する。
-// UpdatedAt は触らない（最終成功フェッチ時刻を保持）。
-func updateSnapshotErr(state, msg string) {
+// updateUsageError は AuthState とエラー文字列を更新する。
+// UpdatedAt は触らない (最終成功フェッチ時刻を保持)。
+func updateUsageError(state, msg string) {
 	usageMu.Lock()
 	cachedUsage.AuthState = state
 	cachedUsage.LastError = msg
@@ -120,16 +104,13 @@ func updateSnapshotErr(state, msg string) {
 }
 
 // startCollector はバックグラウンドの定期取得ループを開始する。
-// 初回フェッチは goroutine で非同期実行（起動をブロックしない）。
-// WebView フロントは authState=="init" の間だけ短間隔ポーリングし、
-// 取得完了後に 5 分 / 60 秒インターバルに切り替える想定。
-// プロセス寿命 = アプリ寿命なので明示的な停止は行わない（os.Exit でクリーンアップ）。
+// 補助 WebView の JS 側にも 5 分の setInterval があるが、Go 側からも明示的に
+// トリガーすることでスロットル時の保険とする。
+// プロセス寿命 = アプリ寿命なので明示的な停止は行わない。
 func startCollector() {
 	usageMu.Lock()
 	cachedUsage.AuthState = "init"
 	usageMu.Unlock()
-
-	go refreshUsage()
 
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)

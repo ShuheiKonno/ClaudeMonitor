@@ -40,7 +40,6 @@ var (
 	procTrackPopupMenu   = user32.NewProc("TrackPopupMenu")
 	procDestroyMenu      = user32.NewProc("DestroyMenu")
 	procPostMessageW     = user32.NewProc("PostMessageW")
-	procMessageBoxW      = user32.NewProc("MessageBoxW")
 
 	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
 )
@@ -71,8 +70,6 @@ const (
 	IDM_EXIT    = 2
 	IDM_REAUTH  = 3
 	IDM_REFRESH = 4
-
-	MB_ICONINFORMATION = 0x00000040
 
 	trayIconID    = 1
 	trayIconSize  = 16
@@ -209,7 +206,7 @@ func trayWndProc(hwnd, msg uintptr, wParam, lParam uintptr) uintptr {
 				updateTrayFromSnapshot()
 			}()
 		case IDM_REAUTH:
-			showReauthDialog()
+			showAuthWebView()
 		case IDM_EXIT:
 			removeTrayIcon()
 			os.Exit(0)
@@ -271,7 +268,7 @@ func showTrayMenu(hwnd uintptr) {
 	}
 	showPtr, _ := syscall.UTF16PtrFromString("表示")
 	refreshPtr, _ := syscall.UTF16PtrFromString("更新")
-	reauthPtr, _ := syscall.UTF16PtrFromString("再認証…")
+	reauthPtr, _ := syscall.UTF16PtrFromString("Claude にログイン…")
 	exitPtr, _ := syscall.UTF16PtrFromString("終了")
 	procAppendMenuW.Call(menu, MF_STRING, IDM_SHOW, uintptr(unsafe.Pointer(showPtr)))
 	procAppendMenuW.Call(menu, MF_STRING, IDM_REFRESH, uintptr(unsafe.Pointer(refreshPtr)))
@@ -287,21 +284,6 @@ func showTrayMenu(hwnd uintptr) {
 	procTrackPopupMenu.Call(menu, TPM_RIGHTBUTTON, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
 	procPostMessageW.Call(hwnd, 0, 0, 0)
 	procDestroyMenu.Call(menu)
-}
-
-// showReauthDialog は OAuth の再認証手順を案内する情報ダイアログを表示する。
-// CLI から `claude` を起動してもらう前提。ワンクリックでシェルを開く機能は持たない。
-func showReauthDialog() {
-	msg := "Claude Monitor は Claude Code の認証情報（~/.claude/.credentials.json）を共有しています。\r\n\r\n" +
-		"再認証するには:\r\n" +
-		"1. ターミナル（コマンドプロンプト / PowerShell）を開く\r\n" +
-		"2. claude と入力して実行\r\n" +
-		"3. 画面の指示に従いログイン\r\n\r\n" +
-		"完了後、しばらくするとウィジェットが自動的に回復します。"
-	title := "Claude Monitor — 再認証"
-	msgPtr, _ := syscall.UTF16PtrFromString(msg)
-	titlePtr, _ := syscall.UTF16PtrFromString(title)
-	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(msgPtr)), uintptr(unsafe.Pointer(titlePtr)), MB_ICONINFORMATION)
 }
 
 // clampPct はサーバから返る float の使用率を表示用の整数 % に丸める（0–100 にクランプ）。
@@ -337,10 +319,8 @@ func updateTrayFromSnapshot() {
 
 func trayTooltipForError(snap UsageSnapshot) string {
 	switch snap.AuthState {
-	case "missing":
-		return "Claude モニター — 未ログイン\n右クリック → 再認証"
-	case "expired":
-		return "Claude モニター — トークン期限切れ\n右クリック → 再認証"
+	case "needs_login":
+		return "Claude モニター — 未ログイン\n右クリック → ログイン"
 	case "network_error":
 		return "Claude モニター — 取得失敗\n" + truncateString(snap.LastError, 80)
 	case "init":

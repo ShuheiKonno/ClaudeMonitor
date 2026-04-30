@@ -276,7 +276,9 @@ func main() {
 	}
 	appRoot := filepath.Join(localAppData, "ClaudeMonitor")
 	dataPath := filepath.Join(appRoot, "WebView2")
+	authDataPath := filepath.Join(appRoot, "AuthWebView2")
 	_ = os.MkdirAll(dataPath, 0755)
+	_ = os.MkdirAll(authDataPath, 0755)
 
 	configPath = filepath.Join(appRoot, "config.json")
 	loadConfig()
@@ -303,6 +305,21 @@ func main() {
 		panic("Failed to create webview")
 	}
 	defer w.Destroy()
+
+	// 主 WebView の Dispatch キューだけが w.Run() でドレインされるため、
+	// auth WebView 用の Dispatch も全てここを通す必要がある (同一スレッドなので
+	// 実体としては安全)。詳細は uiDispatch のコメント参照。
+	mainWebViewInst = w
+
+	// claude.ai 認証 + 取得用の補助 WebView をオフスクリーンに立ち上げる。
+	// 主 UI WebView と同スレッド (LockOSThread 済み) で動き、メッセージは
+	// w.Run() の単一メッセージループから両ウィンドウへディスパッチされる。
+	startAuthWebView(authDataPath)
+	defer func() {
+		if authWebViewInst != nil {
+			authWebViewInst.Destroy()
+		}
+	}()
 
 	go func() {
 		deadline := time.Now().Add(5 * time.Second)
