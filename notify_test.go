@@ -1,0 +1,283 @@
+package main
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+type balloonCall struct {
+	title string
+	msg   string
+	flag  uint32
+}
+
+// resetNotifyState は通知のグローバル状態をテスト前に初期化する。
+func resetNotifyState() {
+	notifyMu.Lock()
+	notify5hResetsAt = time.Time{}
+	notified5h60 = false
+	notified5h80 = false
+	notify5hInitialized = false
+	notifiedIncidents = map[string]bool{}
+	notifyStatusInitialized = false
+	notifyMu.Unlock()
+}
+
+// withMockBalloon は balloonFn を差し替え、呼び出しを記録するフックをテストに渡す。
+func withMockBalloon(t *testing.T) *[]balloonCall {
+	t.Helper()
+	calls := &[]balloonCall{}
+	prev := balloonFn
+	balloonFn = func(title, msg string, flag uint32) {
+		*calls = append(*calls, balloonCall{title, msg, flag})
+	}
+	t.Cleanup(func() { balloonFn = prev })
+	return calls
+}
+
+// withConfig は config を一時的に書き換える（テスト後に復元）。
+func withConfig(t *testing.T, modify func(c *Config)) {
+	t.Helper()
+	configMu.Lock()
+	prev := config
+	modify(&config)
+	configMu.Unlock()
+	t.Cleanup(func() {
+		configMu.Lock()
+		config = prev
+		configMu.Unlock()
+	})
+}
+
+func snap5h(util float64, resetsAt time.Time) UsageSnapshot {
+	return UsageSnapshot{
+		AuthState: "ok",
+		FiveHour:  UsageWindow{Utilization: util, ResetsAt: &resetsAt},
+	}
+}
+
+func TestUsageNotify_SuppressOnInitialSnapshot(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	handleUsageNotification(snap5h(45, r))
+
+	if len(*calls) != 0 {
+		t.Fatalf("初回スナップショットでは通知抑制されるべき: got %d calls", len(*calls))
+	}
+}
+
+func TestUsageNotify_60PctCrossingFiresOnce(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	handleUsageNotification(snap5h(45, r))    // 初期化
+	handleUsageNotification(snap5h(65, r))    // 60% 跨ぎ
+	handleUsageNotification(snap5h(70, r))    // 既通知
+	handleUsageNotification(snap5h(75, r))    // 既通知
+
+	if len(*calls) != 1 {
+		t.Fatalf("60%% 跨ぎは 1 回だけ通知されるべき: got %d calls", len(*calls))
+	}
+	if !strings.Contains((*calls)[0].title, "60") {
+		t.Fatalf("60%% 通知タイトル想定外: %q", (*calls)[0].title)
+	}
+	if (*calls)[0].flag != NIIF_INFO {
+		t.Fatalf("60%% は NIIF_INFO 想定: got %d", (*calls)[0].flag)
+	}
+}
+
+func TestUsageNotify_80PctCrossingFiresWarningOnce(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	handleUsageNotification(snap5h(50, r)) // init
+	handleUsageNotification(snap5h(65, r)) // 60 fired
+	handleUsageNotification(snap5h(85, r)) // 80 fired
+	handleUsageNotification(snap5h(95, r)) // 既通知
+
+	if len(*calls) != 2 {
+		t.Fatalf("60 と 80 で計 2 回通知されるべき: got %d", len(*calls))
+	}
+	if !strings.Contains((*calls)[1].title, "80") {
+		t.Fatalf("2 回目は 80%% 通知のはず: %q", (*calls)[1].title)
+	}
+	if (*calls)[1].flag != NIIF_WARNING {
+		t.Fatalf("80%% は NIIF_WARNING 想定: got %d", (*calls)[1].flag)
+	}
+}
+
+func TestUsageNotify_DirectJumpOver80Skips60Notification(t *testing.T) {
+	// 60% を経由せず一気に 80% を超えた場合、80 通知だけが出る。
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	handleUsageNotification(snap5h(40, r)) // init
+	handleUsageNotification(snap5h(85, r)) // 80 (60 もマーク済扱い)
+
+	if len(*calls) != 1 {
+		t.Fatalf("80%% 通知 1 回だけのはず: got %d", len(*calls))
+	}
+	if !strings.Contains((*calls)[0].title, "80") {
+		t.Fatalf("80%% タイトルでないと不正: %q", (*calls)[0].title)
+	}
+}
+
+func TestUsageNotify_ResetClearsFlagsAndRefires(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r1 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	handleUsageNotification(snap5h(50, r1)) // init
+	handleUsageNotification(snap5h(65, r1)) // 60 fired
+
+	r2 := r1.Add(5 * time.Hour) // ResetsAt 変化 = 新セッション
+	handleUsageNotification(snap5h(70, r2)) // 60 再通知されるべき
+
+	if len(*calls) != 2 {
+		t.Fatalf("リセット後の 60%% 跨ぎで再通知すべき: got %d", len(*calls))
+	}
+}
+
+func TestUsageNotify_DisabledByConfig(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = false })
+
+	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	handleUsageNotification(snap5h(50, r))
+	handleUsageNotification(snap5h(85, r))
+
+	if len(*calls) != 0 {
+		t.Fatalf("無効時は通知ゼロ: got %d", len(*calls))
+	}
+}
+
+func TestUsageNotify_AuthStateNotOkSkips(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	snap := UsageSnapshot{
+		AuthState: "needs_login",
+		FiveHour:  UsageWindow{Utilization: 90, ResetsAt: &r},
+	}
+	handleUsageNotification(snap)
+
+	if len(*calls) != 0 {
+		t.Fatalf("AuthState != ok では通知抑制: got %d", len(*calls))
+	}
+}
+
+func snapStatus(incidents []IncidentSummary) StatusSnapshot {
+	return StatusSnapshot{Incidents: incidents}
+}
+
+func TestStatusNotify_SuppressInitialIncidents(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyStatus = true })
+
+	handleStatusNotification(snapStatus([]IncidentSummary{
+		{ID: "abc", Name: "起動時から進行中", Impact: "minor"},
+	}))
+
+	if len(*calls) != 0 {
+		t.Fatalf("初回 fetch の既存 incident は抑制: got %d", len(*calls))
+	}
+}
+
+func TestStatusNotify_NewIncidentFires(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyStatus = true })
+
+	handleStatusNotification(snapStatus(nil)) // init: 既存ゼロ
+	handleStatusNotification(snapStatus([]IncidentSummary{
+		{ID: "new1", Name: "claude.ai outage", Impact: "major"},
+	}))
+
+	if len(*calls) != 1 {
+		t.Fatalf("新規 incident は 1 回通知: got %d", len(*calls))
+	}
+	if (*calls)[0].flag != NIIF_WARNING {
+		t.Fatalf("major は NIIF_WARNING: got %d", (*calls)[0].flag)
+	}
+	if !strings.Contains((*calls)[0].msg, "outage") {
+		t.Fatalf("メッセージに incident 名が入っているはず: %q", (*calls)[0].msg)
+	}
+}
+
+func TestStatusNotify_SameIncidentNotRefired(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyStatus = true })
+
+	handleStatusNotification(snapStatus(nil))
+	handleStatusNotification(snapStatus([]IncidentSummary{{ID: "x", Name: "a", Impact: "minor"}}))
+	handleStatusNotification(snapStatus([]IncidentSummary{{ID: "x", Name: "a", Impact: "minor"}}))
+
+	if len(*calls) != 1 {
+		t.Fatalf("同一 ID は再通知しない: got %d", len(*calls))
+	}
+}
+
+func TestStatusNotify_ResolvedThenReoccurringRefires(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyStatus = true })
+
+	handleStatusNotification(snapStatus(nil))                                              // init
+	handleStatusNotification(snapStatus([]IncidentSummary{{ID: "x", Name: "a", Impact: "minor"}})) // 初通知
+	handleStatusNotification(snapStatus(nil))                                              // 解決
+	handleStatusNotification(snapStatus([]IncidentSummary{{ID: "x", Name: "a", Impact: "minor"}})) // 再発 → 再通知
+
+	if len(*calls) != 2 {
+		t.Fatalf("再発時は再通知: got %d", len(*calls))
+	}
+}
+
+func TestStatusNotify_CriticalImpactErrorIcon(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyStatus = true })
+
+	handleStatusNotification(snapStatus(nil))
+	handleStatusNotification(snapStatus([]IncidentSummary{{ID: "z", Name: "down", Impact: "critical"}}))
+
+	if len(*calls) != 1 {
+		t.Fatalf("通知 1 件想定: got %d", len(*calls))
+	}
+	if (*calls)[0].flag != NIIF_ERROR {
+		t.Fatalf("critical は NIIF_ERROR: got %d", (*calls)[0].flag)
+	}
+	if !strings.Contains((*calls)[0].title, "致命的") {
+		t.Fatalf("critical タイトルに「致命的」を含むはず: %q", (*calls)[0].title)
+	}
+}
+
+func TestStatusNotify_DisabledByConfig(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyStatus = false })
+
+	handleStatusNotification(snapStatus(nil))
+	handleStatusNotification(snapStatus([]IncidentSummary{{ID: "y", Name: "n", Impact: "major"}}))
+
+	if len(*calls) != 0 {
+		t.Fatalf("無効時は通知ゼロ: got %d", len(*calls))
+	}
+}

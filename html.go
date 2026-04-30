@@ -9,18 +9,18 @@ func getHTML() string {
 <title>Claude モニター</title>
 <style>
   :root {
-    --bg-grad: linear-gradient(135deg, #1e2030 0%, #2b2845 100%);
-    --fg: #e5e7ee;
-    --fg-dim: #9ea3b5;
+    --bg-grad: linear-gradient(135deg, #0a0a0d 0%, #15161c 100%);
+    --fg: #e7e8ee;
+    --fg-dim: #8a8d99;
     --accent: #8b9eff;
-    --card: rgba(255,255,255,0.05);
-    --border: rgba(255,255,255,0.08);
-    --bar-bg: rgba(255,255,255,0.1);
+    --card: rgba(255,255,255,0.035);
+    --border: rgba(255,255,255,0.06);
+    --bar-bg: rgba(255,255,255,0.07);
     --bar-ok: #4ade80;
     --bar-warn: #facc15;
     --bar-crit: #f87171;
-    --err-bg: rgba(248,113,113,0.15);
-    --err-border: rgba(248,113,113,0.4);
+    --err-bg: rgba(248,113,113,0.12);
+    --err-border: rgba(248,113,113,0.35);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -40,7 +40,7 @@ func getHTML() string {
     align-items: center;
     justify-content: space-between;
     padding: 4px 8px;
-    background: rgba(0,0,0,0.25);
+    background: rgba(0,0,0,0.45);
     border-bottom: 1px solid var(--border);
     cursor: move;
   }
@@ -274,6 +274,12 @@ func getHTML() string {
     border-radius: 4px;
     padding: 5px 8px;
   }
+  .settings .group-title {
+    font-size: 10px;
+    color: var(--fg-dim);
+    margin-bottom: 3px;
+    letter-spacing: 0.04em;
+  }
   .settings .row {
     display: flex;
     align-items: center;
@@ -285,6 +291,7 @@ func getHTML() string {
     gap: 4px;
     font-size: 11px;
   }
+  .settings label + label { margin-top: 3px; }
   .settings button {
     padding: 4px 10px;
     background: var(--accent);
@@ -384,6 +391,12 @@ func getHTML() string {
         <label><input type="checkbox" id="topmost"> 最前面</label>
         <label><input type="checkbox" id="transparent"> 半透明</label>
       </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">通知</div>
+      <label><input type="checkbox" id="notify-usage"> 5時間使用量 60% / 80%</label>
+      <label><input type="checkbox" id="notify-status"> Claude Status 障害検知</label>
     </div>
 
     <div class="row" style="justify-content: flex-end; gap: 6px; margin-top: auto;">
@@ -632,6 +645,8 @@ async function openSettings() {
   const s = await res.json();
   document.getElementById('topmost').checked = !!s.topmost;
   document.getElementById('transparent').checked = !!s.transparent;
+  document.getElementById('notify-usage').checked = !!s.notifyUsage;
+  document.getElementById('notify-status').checked = !!s.notifyStatus;
   mainView.classList.add('hidden');
   settingsView.classList.add('active');
 }
@@ -645,6 +660,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
   const payload = {
     topmost: document.getElementById('topmost').checked,
     transparent: document.getElementById('transparent').checked,
+    notifyUsage: document.getElementById('notify-usage').checked,
+    notifyStatus: document.getElementById('notify-status').checked,
   };
   await fetch('/api/setoption', {
     method: 'POST',

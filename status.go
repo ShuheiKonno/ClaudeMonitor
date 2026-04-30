@@ -214,6 +214,7 @@ func getStatusSnapshot() StatusSnapshot {
 	cachedStatus = snap
 	lastStatusFetch = time.Now()
 	statusMu.Unlock()
+	handleStatusNotification(snap)
 	return snap
 }
 

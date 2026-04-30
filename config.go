@@ -15,8 +15,10 @@ type Config struct {
 		Height int32 `json:"height"`
 		Saved  bool  `json:"saved"`
 	} `json:"window"`
-	Topmost     bool `json:"topmost"`
-	Transparent bool `json:"transparent"`
+	Topmost      bool `json:"topmost"`
+	Transparent  bool `json:"transparent"`
+	NotifyUsage  bool `json:"notifyUsage"`
+	NotifyStatus bool `json:"notifyStatus"`
 }
 
 var (
@@ -28,6 +30,8 @@ var (
 func defaultConfig() Config {
 	var c Config
 	c.Topmost = true
+	c.NotifyUsage = true
+	c.NotifyStatus = true
 	return c
 }
 
