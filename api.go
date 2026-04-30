@@ -25,8 +25,10 @@ func openExternalURL(url string) {
 }
 
 type settingsPayload struct {
-	Topmost     bool `json:"topmost"`
-	Transparent bool `json:"transparent"`
+	Topmost      bool `json:"topmost"`
+	Transparent  bool `json:"transparent"`
+	NotifyUsage  bool `json:"notifyUsage"`
+	NotifyStatus bool `json:"notifyStatus"`
 }
 
 func startServer() (int, error) {
@@ -49,8 +51,10 @@ func startServer() (int, error) {
 	mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
 		cfg := snapshotConfig()
 		writeJSON(w, settingsPayload{
-			Topmost:     cfg.Topmost,
-			Transparent: cfg.Transparent,
+			Topmost:      cfg.Topmost,
+			Transparent:  cfg.Transparent,
+			NotifyUsage:  cfg.NotifyUsage,
+			NotifyStatus: cfg.NotifyStatus,
 		})
 	})
 
@@ -63,6 +67,8 @@ func startServer() (int, error) {
 		mutateConfig(func(c *Config) {
 			c.Topmost = p.Topmost
 			c.Transparent = p.Transparent
+			c.NotifyUsage = p.NotifyUsage
+			c.NotifyStatus = p.NotifyStatus
 		})
 		setTopmost(p.Topmost)
 		setTransparent(p.Transparent)

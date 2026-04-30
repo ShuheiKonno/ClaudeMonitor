@@ -280,6 +280,7 @@ func applyUsagePayload(p rawClaudeUsagePayload) {
 		hideAuthWebView()
 	}
 	updateTrayFromSnapshot()
+	handleUsageNotification(snap)
 }
 
 func mapClaudeWindow(w *rawClaudeWindow) UsageWindow {

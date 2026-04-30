@@ -52,6 +52,12 @@ const (
 	NIF_MESSAGE = 0x00000001
 	NIF_ICON    = 0x00000002
 	NIF_TIP     = 0x00000004
+	NIF_INFO    = 0x00000010
+
+	NIIF_NONE    = 0x00000000
+	NIIF_INFO    = 0x00000001
+	NIIF_WARNING = 0x00000002
+	NIIF_ERROR   = 0x00000003
 
 	WM_APP       = 0x8000
 	WM_TRAY      = WM_APP + 1
@@ -644,6 +650,38 @@ func setTrayIcon(hIcon uintptr, tip string) {
 	if old != 0 && old != hIcon {
 		procDestroyIcon.Call(old)
 	}
+}
+
+// showBalloonNotification はトレイアイコン経由でバルーン (Win10/11 ではトースト) 通知を表示する。
+// flag は NIIF_INFO / NIIF_WARNING / NIIF_ERROR のいずれか。
+// トレイ未追加時は何もしない。
+func showBalloonNotification(title, message string, flag uint32) {
+	trayMu.Lock()
+	defer trayMu.Unlock()
+	if !trayAdded {
+		return
+	}
+	var nid notifyIconData
+	nid.CbSize = uint32(unsafe.Sizeof(nid))
+	nid.HWnd = trayHwnd
+	nid.UID = trayIconID
+	nid.UFlags = NIF_INFO
+	nid.DwInfoFlags = flag
+	if t, err := syscall.UTF16FromString(title); err == nil {
+		n := len(t)
+		if n > len(nid.SzInfoTitle) {
+			n = len(nid.SzInfoTitle)
+		}
+		copy(nid.SzInfoTitle[:], t[:n])
+	}
+	if m, err := syscall.UTF16FromString(message); err == nil {
+		n := len(m)
+		if n > len(nid.SzInfo) {
+			n = len(nid.SzInfo)
+		}
+		copy(nid.SzInfo[:], m[:n])
+	}
+	procShellNotifyIcon.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))
 }
 
 func removeTrayIcon() {
