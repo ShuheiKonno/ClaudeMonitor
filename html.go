@@ -271,11 +271,27 @@ const htmlTemplate = `<!DOCTYPE html>
     padding: 6px 8px;
     flex-direction: column;
     gap: 4px;
-    overflow-y: auto;
-    scrollbar-width: thin;
+    overflow: hidden;
+    min-height: 0;
   }
-  .settings::-webkit-scrollbar { width: 6px; }
-  .settings::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
+  .settings-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    scrollbar-width: thin;
+    padding-right: 2px;
+  }
+  .settings-scroll::-webkit-scrollbar { width: 6px; }
+  .settings-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
+  .settings-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+  }
   .settings.active { display: flex; }
   .content.hidden { display: none; }
 
@@ -399,24 +415,26 @@ const htmlTemplate = `<!DOCTYPE html>
   </div>
 
   <div class="settings" id="settings-view">
-    <div class="group">
-      <div class="account" id="account-info">取得中…</div>
-    </div>
+    <div class="settings-scroll">
+      <div class="group">
+        <div class="account" id="account-info">取得中…</div>
+      </div>
 
-    <div class="group">
-      <div class="row" style="gap:12px">
-        <label><input type="checkbox" id="topmost"> 最前面</label>
-        <label><input type="checkbox" id="transparent"> 半透明</label>
+      <div class="group">
+        <div class="row" style="gap:12px">
+          <label><input type="checkbox" id="topmost"> 最前面</label>
+          <label><input type="checkbox" id="transparent"> 半透明</label>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-title">通知</div>
+        <label><input type="checkbox" id="notify-usage"> 5時間使用量 60% / 80%</label>
+        <label><input type="checkbox" id="notify-status"> Claude Status 障害検知</label>
       </div>
     </div>
 
-    <div class="group">
-      <div class="group-title">通知</div>
-      <label><input type="checkbox" id="notify-usage"> 5時間使用量 60% / 80%</label>
-      <label><input type="checkbox" id="notify-status"> Claude Status 障害検知</label>
-    </div>
-
-    <div style="margin-top: auto; display: flex; flex-direction: column; gap: 4px;">
+    <div class="settings-footer">
       <div class="row" style="justify-content: flex-end; gap: 6px;">
         <button id="btn-cancel" style="background: rgba(255,255,255,0.1); color: var(--fg);">戻る</button>
         <button id="btn-save">保存</button>
