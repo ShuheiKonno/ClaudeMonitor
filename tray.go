@@ -353,7 +353,7 @@ func drawTrayIconImage(pct5h, pct7d int) *image.RGBA {
 	// 7d バンドで配色決定。Claude 系の暖色系で統一。
 	var diskColor, rimColor, fgColor color.RGBA
 	switch {
-	case pct7d < 60:
+	case pct7d <= 60:
 		diskColor = color.RGBA{R: 123, G: 176, B: 123, A: 255} // sage green #7BB07B
 		rimColor = color.RGBA{R: 77, G: 128, B: 77, A: 255}
 		fgColor = color.RGBA{R: 20, G: 28, B: 20, A: 255}
