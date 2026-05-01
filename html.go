@@ -196,6 +196,7 @@ const htmlTemplate = `<!DOCTYPE html>
     font-size: 9px;
     color: var(--fg-dim);
     padding: 1px 0 0;
+    margin-top: auto;
   }
 
   .auth-banner {

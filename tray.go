@@ -67,7 +67,6 @@ const (
 
 	MF_STRING    = 0x00000000
 	MF_GRAYED    = 0x00000001
-	MF_DISABLED  = 0x00000002
 	MF_SEPARATOR = 0x00000800
 
 	TPM_RIGHTBUTTON = 0x0002
@@ -274,14 +273,14 @@ func showTrayMenu(hwnd uintptr) {
 	if menu == 0 {
 		return
 	}
-	versionPtr, _ := syscall.UTF16PtrFromString("ClaudeMonitor " + AppVersion)
+	versionPtr, _ := syscall.UTF16PtrFromString(trayVersionLabel)
 	copyrightPtr, _ := syscall.UTF16PtrFromString(Copyright)
 	showPtr, _ := syscall.UTF16PtrFromString("表示")
 	refreshPtr, _ := syscall.UTF16PtrFromString("更新")
 	reauthPtr, _ := syscall.UTF16PtrFromString("Claude にログイン…")
 	exitPtr, _ := syscall.UTF16PtrFromString("終了")
-	procAppendMenuW.Call(menu, MF_STRING|MF_GRAYED|MF_DISABLED, 0, uintptr(unsafe.Pointer(versionPtr)))
-	procAppendMenuW.Call(menu, MF_STRING|MF_GRAYED|MF_DISABLED, 0, uintptr(unsafe.Pointer(copyrightPtr)))
+	procAppendMenuW.Call(menu, MF_STRING|MF_GRAYED, 0, uintptr(unsafe.Pointer(versionPtr)))
+	procAppendMenuW.Call(menu, MF_STRING|MF_GRAYED, 0, uintptr(unsafe.Pointer(copyrightPtr)))
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
 	procAppendMenuW.Call(menu, MF_STRING, IDM_SHOW, uintptr(unsafe.Pointer(showPtr)))
 	procAppendMenuW.Call(menu, MF_STRING, IDM_REFRESH, uintptr(unsafe.Pointer(refreshPtr)))
