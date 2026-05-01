@@ -49,13 +49,17 @@ func handleUsageNotification(snap UsageSnapshot) {
 	if snap.FiveHour.ResetsAt != nil {
 		resetsAt = *snap.FiveHour.ResetsAt
 	}
-	if !resetsAt.Equal(notify5hResetsAt) {
-		notify5hResetsAt = resetsAt
+	pct := snap.FiveHour.Utilization
+
+	// 5h ローリングウィンドウは小幅に resetsAt がずれることがあるため、
+	// 5 時間以上未来へジャンプした場合（= 真にウィンドウがリセットされた）
+	// または利用率が 0% に戻った場合のみフラグをクリアする。
+	windowReset := resetsAt.Sub(notify5hResetsAt) >= 5*time.Hour || pct == 0
+	notify5hResetsAt = resetsAt
+	if windowReset {
 		notified5h60 = false
 		notified5h80 = false
 	}
-
-	pct := snap.FiveHour.Utilization
 
 	if !notify5hInitialized {
 		notify5hInitialized = true
