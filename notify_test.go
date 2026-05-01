@@ -151,6 +151,64 @@ func TestUsageNotify_ResetClearsFlagsAndRefires(t *testing.T) {
 	}
 }
 
+func TestUsageNotify_ResetsAtMinorDriftPreservesFlags(t *testing.T) {
+	// claude.ai の resets_at はフェッチ毎に小幅にずれることがある。
+	// 5h 未満のドリフトでフラグがクリアされて再通知されないこと。
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r1 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	handleUsageNotification(snap5h(50, r1)) // init
+	handleUsageNotification(snap5h(65, r1)) // 60 fired
+
+	handleUsageNotification(snap5h(67, r1.Add(2*time.Minute)))
+	handleUsageNotification(snap5h(68, r1.Add(-1*time.Minute)))
+	handleUsageNotification(snap5h(70, r1.Add(1*time.Hour)))
+
+	if len(*calls) != 1 {
+		t.Fatalf("resetsAt 微小ドリフトでは再通知すべきでない: got %d", len(*calls))
+	}
+}
+
+func TestUsageNotify_ZeroPctClearsFlagsAndRefires(t *testing.T) {
+	// 利用率が 0% に戻ったらフラグをクリアし、再び閾値を跨いだら再通知する。
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	handleUsageNotification(snap5h(50, r)) // init
+	handleUsageNotification(snap5h(85, r)) // 80 fired
+	handleUsageNotification(snap5h(0, r))  // 0% でフラグクリア
+	handleUsageNotification(snap5h(65, r)) // 60 再通知されるべき
+
+	if len(*calls) != 2 {
+		t.Fatalf("0%% 復帰後の 60%% 跨ぎで再通知すべき: got %d", len(*calls))
+	}
+	if !strings.Contains((*calls)[1].title, "60") {
+		t.Fatalf("2 回目は 60%% 通知のはず: %q", (*calls)[1].title)
+	}
+}
+
+func TestUsageNotify_ResetsAtSubFiveHourJumpPreservesFlags(t *testing.T) {
+	// 5h 未満（例: 1h）の前進ではフラグをクリアしない。
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r1 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	handleUsageNotification(snap5h(50, r1)) // init
+	handleUsageNotification(snap5h(65, r1)) // 60 fired
+
+	r2 := r1.Add(1 * time.Hour) // 5h 未満
+	handleUsageNotification(snap5h(70, r2))
+
+	if len(*calls) != 1 {
+		t.Fatalf("5h 未満のジャンプでは再通知すべきでない: got %d", len(*calls))
+	}
+}
+
 func TestUsageNotify_DisabledByConfig(t *testing.T) {
 	resetNotifyState()
 	calls := withMockBalloon(t)
