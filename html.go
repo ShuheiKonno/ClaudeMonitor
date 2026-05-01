@@ -271,8 +271,11 @@ const htmlTemplate = `<!DOCTYPE html>
     padding: 6px 8px;
     flex-direction: column;
     gap: 4px;
-    overflow: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
+  .settings::-webkit-scrollbar { width: 6px; }
+  .settings::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
   .settings.active { display: flex; }
   .content.hidden { display: none; }
 
@@ -413,11 +416,13 @@ const htmlTemplate = `<!DOCTYPE html>
       <label><input type="checkbox" id="notify-status"> Claude Status 障害検知</label>
     </div>
 
-    <div class="row" style="justify-content: flex-end; gap: 6px; margin-top: auto;">
-      <button id="btn-cancel" style="background: rgba(255,255,255,0.1); color: var(--fg);">戻る</button>
-      <button id="btn-save">保存</button>
+    <div style="margin-top: auto; display: flex; flex-direction: column; gap: 4px;">
+      <div class="row" style="justify-content: flex-end; gap: 6px;">
+        <button id="btn-cancel" style="background: rgba(255,255,255,0.1); color: var(--fg);">戻る</button>
+        <button id="btn-save">保存</button>
+      </div>
+      <div class="about">ClaudeMonitor {{VERSION}} · {{COPYRIGHT}}</div>
     </div>
-    <div class="about">ClaudeMonitor {{VERSION}} · {{COPYRIGHT}}</div>
   </div>
 
 <script>
