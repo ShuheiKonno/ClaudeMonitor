@@ -1,12 +1,7 @@
 package main
 
-import "strings"
-
 func getHTML() string {
-	return strings.NewReplacer(
-		"{{VERSION}}", AppVersion,
-		"{{COPYRIGHT}}", Copyright,
-	).Replace(htmlTemplate)
+	return htmlTemplate
 }
 
 const htmlTemplate = `<!DOCTYPE html>
@@ -337,12 +332,6 @@ const htmlTemplate = `<!DOCTYPE html>
     line-height: 1.3;
   }
   .settings .account b { color: var(--fg); font-weight: 600; font-size: 11px; }
-  .settings .about {
-    text-align: center;
-    font-size: 9px;
-    color: var(--fg-dim);
-    padding: 4px 0 0;
-  }
 </style>
 </head>
 <body>
@@ -439,7 +428,6 @@ const htmlTemplate = `<!DOCTYPE html>
         <button id="btn-cancel" style="background: rgba(255,255,255,0.1); color: var(--fg);">戻る</button>
         <button id="btn-save">保存</button>
       </div>
-      <div class="about">ClaudeMonitor {{VERSION}} · {{COPYRIGHT}}</div>
     </div>
   </div>
 
