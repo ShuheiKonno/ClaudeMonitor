@@ -281,7 +281,9 @@ func main() {
 	_ = os.MkdirAll(authDataPath, 0755)
 
 	configPath = filepath.Join(appRoot, "config.json")
+	notifyLogPath = filepath.Join(appRoot, "notify.log")
 	loadConfig()
+	loadNotifyState()
 
 	startCollector()
 	port, err := startServer()

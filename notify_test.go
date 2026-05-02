@@ -18,7 +18,6 @@ func resetNotifyState() {
 	notify5hResetsAt = time.Time{}
 	notified5h60 = false
 	notified5h80 = false
-	notify5hInitialized = false
 	notifiedIncidents = map[string]bool{}
 	notifyStatusInitialized = false
 	notifyMu.Unlock()
@@ -206,6 +205,45 @@ func TestUsageNotify_ResetsAtSubFiveHourJumpPreservesFlags(t *testing.T) {
 
 	if len(*calls) != 1 {
 		t.Fatalf("5h 未満のジャンプでは再通知すべきでない: got %d", len(*calls))
+	}
+}
+
+func TestUsageNotify_RestartAboveThresholdFires(t *testing.T) {
+	// 再起動直後でも、未通知のウィンドウで pct が閾値超過していれば発火する。
+	// 旧実装は init suppression で永久に抑制していた回帰のリグレッションテスト。
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+
+	r := time.Date(2026, 5, 2, 22, 0, 0, 0, time.UTC)
+	handleUsageNotification(snap5h(95, r)) // 起動直後の最初のフェッチが既に 95%
+
+	if len(*calls) != 1 {
+		t.Fatalf("再起動直後でも 80%% 跨ぎは 1 回通知すべき: got %d", len(*calls))
+	}
+	if !strings.Contains((*calls)[0].title, "80") {
+		t.Fatalf("80%% 通知のはず: %q", (*calls)[0].title)
+	}
+}
+
+func TestUsageNotify_RestartSameWindowSuppressesViaPersistedState(t *testing.T) {
+	// 永続化された通知済みフラグを config から読み込めば、同一ウィンドウ内の
+	// 再起動で重複通知が出ない。
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	r := time.Date(2026, 5, 2, 22, 0, 0, 0, time.UTC)
+	withConfig(t, func(c *Config) {
+		c.NotifyUsage = true
+		c.Notify5hResetsAt = r
+		c.Notified5h60 = true
+		c.Notified5h80 = true
+	})
+	loadNotifyState()
+
+	handleUsageNotification(snap5h(95, r))
+
+	if len(*calls) != 0 {
+		t.Fatalf("永続化された通知済み状態では再通知しない: got %d", len(*calls))
 	}
 }
 
