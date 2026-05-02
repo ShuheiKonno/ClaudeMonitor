@@ -73,10 +73,11 @@ const (
 
 	SW_HIDE_VAL = 0
 
-	IDM_SHOW    = 1
-	IDM_EXIT    = 2
-	IDM_REAUTH  = 3
-	IDM_REFRESH = 4
+	IDM_SHOW        = 1
+	IDM_EXIT        = 2
+	IDM_REAUTH      = 3
+	IDM_REFRESH     = 4
+	IDM_TEST_NOTIFY = 5
 
 	trayIconID    = 1
 	trayIconSize  = 16
@@ -214,6 +215,13 @@ func trayWndProc(hwnd, msg uintptr, wParam, lParam uintptr) uintptr {
 			}()
 		case IDM_REAUTH:
 			showAuthWebView()
+		case IDM_TEST_NOTIFY:
+			notifyLog("test-notify menu invoked")
+			showBalloonNotification(
+				"Claude モニター — テスト通知",
+				"これはテスト用の通知です。表示されていれば配管は正常です。",
+				NIIF_INFO,
+			)
 		case IDM_EXIT:
 			removeTrayIcon()
 			os.Exit(0)
@@ -277,6 +285,7 @@ func showTrayMenu(hwnd uintptr) {
 	copyrightPtr, _ := syscall.UTF16PtrFromString(Copyright)
 	showPtr, _ := syscall.UTF16PtrFromString("表示")
 	refreshPtr, _ := syscall.UTF16PtrFromString("更新")
+	testNotifyPtr, _ := syscall.UTF16PtrFromString("テスト通知")
 	reauthPtr, _ := syscall.UTF16PtrFromString("Claude にログイン…")
 	exitPtr, _ := syscall.UTF16PtrFromString("終了")
 	procAppendMenuW.Call(menu, MF_STRING|MF_GRAYED, 0, uintptr(unsafe.Pointer(versionPtr)))
@@ -284,6 +293,7 @@ func showTrayMenu(hwnd uintptr) {
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
 	procAppendMenuW.Call(menu, MF_STRING, IDM_SHOW, uintptr(unsafe.Pointer(showPtr)))
 	procAppendMenuW.Call(menu, MF_STRING, IDM_REFRESH, uintptr(unsafe.Pointer(refreshPtr)))
+	procAppendMenuW.Call(menu, MF_STRING, IDM_TEST_NOTIFY, uintptr(unsafe.Pointer(testNotifyPtr)))
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
 	procAppendMenuW.Call(menu, MF_STRING, IDM_REAUTH, uintptr(unsafe.Pointer(reauthPtr)))
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
@@ -665,6 +675,7 @@ func showBalloonNotification(title, message string, flag uint32) {
 	trayMu.Lock()
 	defer trayMu.Unlock()
 	if !trayAdded {
+		notifyLog("balloon skip trayAdded=false title=%q", title)
 		return
 	}
 	var nid notifyIconData
@@ -687,7 +698,8 @@ func showBalloonNotification(title, message string, flag uint32) {
 		}
 		copy(nid.SzInfo[:], m[:n])
 	}
-	procShellNotifyIcon.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))
+	r, _, lastErr := procShellNotifyIcon.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))
+	notifyLog("balloon call title=%q flag=%d ret=%d err=%v", title, flag, r, lastErr)
 }
 
 func removeTrayIcon() {
