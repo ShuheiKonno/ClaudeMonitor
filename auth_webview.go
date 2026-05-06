@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -32,18 +33,53 @@ const (
 
 	WS_EX_APPWINDOW  = 0x00040000
 	WS_EX_TOOLWINDOW = 0x00000080
+
+	WM_CLOSE      = 0x0010
+	GWLP_WNDPROC  = -4
 )
 
 // 定数で書くと const 評価で uintptr オーバーフローになるため var で保持。
 var (
 	authOffscreenX int32 = -32000
 	authOffscreenY int32 = -32000
+
+	procSetWindowLongPtr = user32.NewProc("SetWindowLongPtrW")
+	procCallWindowProc   = user32.NewProc("CallWindowProcW")
+
+	origAuthWndProc     uintptr
+	authWndProcCallback = syscall.NewCallback(authWndProc)
 )
+
+// authWndProc は補助 WebView ウィンドウのサブクラス化プロシージャ。
+// Xボタンクリック (WM_CLOSE) でアプリ全体が終了するのを防ぎ、非表示処理に置き換える。
+// それ以外のメッセージは元のプロシージャに委譲する。
+func authWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
+	if msg == WM_CLOSE {
+		if authWebViewVisible.CompareAndSwap(true, false) {
+			moveAuthOffscreenInline()
+		}
+		return 0
+	}
+	r, _, _ := procCallWindowProc.Call(origAuthWndProc, hwnd, msg, wParam, lParam)
+	return r
+}
+
+// subclassAuthWindow は補助 WebView ウィンドウをサブクラス化して WM_CLOSE をフックする。
+// startAuthWebView の HWND 取得後に呼び出す。
+func subclassAuthWindow() {
+	if authWebViewHandle == 0 {
+		return
+	}
+	gwlpWndProc := int32(GWLP_WNDPROC)
+	r, _, _ := procSetWindowLongPtr.Call(authWebViewHandle, uintptr(gwlpWndProc), authWndProcCallback)
+	origAuthWndProc = r
+}
 
 var (
 	authWebViewHandle  uintptr
 	authWebViewInst    webview2.WebView
 	authWebViewVisible atomic.Bool
+	authDataPath       string
 
 	// mainWebViewInst は主 UI WebView。auth 側で Dispatch すると関数が
 	// 実行されない (go-webview2 の Run ループは自分の dispatchq だけを
@@ -84,6 +120,7 @@ type rawClaudeWindow struct {
 // startAuthWebView は補助 WebView を生成し、オフスクリーン配置 + JS 注入を行う。
 // 必ず w.Run() を呼ぶ前 (LockOSThread 済み主 goroutine) に呼ぶこと。
 func startAuthWebView(dataPath string) {
+	authDataPath = dataPath
 	aw := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:    false,
 		DataPath: dataPath,
@@ -112,6 +149,9 @@ func startAuthWebView(dataPath string) {
 	// Dispatch を経由せず直接 Win32 を叩いてよい。これで起動時に
 	// auth ウィンドウが一瞬画面に出る "フラッシュ" を回避できる。
 	moveAuthOffscreenInline()
+
+	// Xボタン (WM_CLOSE) によるアプリ終了を防ぐためウィンドウプロシージャをサブクラス化する。
+	subclassAuthWindow()
 
 	if err := aw.Bind("__postUsageData", func(jsonStr string) {
 		var p rawClaudeUsagePayload
@@ -250,6 +290,21 @@ func showAuthWebView() {
 	})
 }
 
+// logoutUser はHttpOnly Cookieを含む全セッションをクリアするため、
+// 認証データディレクトリの削除を新プロセスに委ねてアプリを再起動する。
+// WebView2が動いている間はデータディレクトリをロックするため、
+// 旧プロセス側では削除できず、新プロセスが旧プロセス終了後に削除する。
+func logoutUser() {
+	go func() {
+		exe, err := os.Executable()
+		if err == nil {
+			exec.Command(exe, "--restarted").Start()
+		}
+		removeTrayIcon()
+		os.Exit(0)
+	}()
+}
+
 // hideAuthWebView はログイン完了後にオフスクリーンへ戻す。
 func hideAuthWebView() {
 	if authWebViewHandle == 0 {
@@ -281,6 +336,17 @@ func applyUsagePayload(p rawClaudeUsagePayload) {
 	}
 	updateTrayFromSnapshot()
 	handleUsageNotification(snap)
+	// 主 UI のポーリング待ち (最大60秒) を回避するため、Eval で即時更新を促す。
+	// 同時に topmost / transparent をログイン直後に再適用する
+	// (WebView2 初期化やナビゲーションで z-order が外れるケースの保険)。
+	if mainWebViewInst != nil {
+		uiDispatch(func() {
+			mainWebViewInst.Eval("if (typeof fetchUsage === 'function') fetchUsage();")
+			c := snapshotConfig()
+			setTopmost(c.Topmost)
+			setTransparent(c.Transparent)
+		})
+	}
 }
 
 func mapClaudeWindow(w *rawClaudeWindow) UsageWindow {

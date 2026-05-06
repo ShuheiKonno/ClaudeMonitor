@@ -265,6 +265,18 @@ func ensureSingleInstance(windowTitle string) bool {
 func main() {
 	runtime.LockOSThread()
 
+	// ログアウト再起動時は旧インスタンスのミューテックス解放とWebView2のファイルロック解放を待つ
+	isRestart := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--restarted" {
+			isRestart = true
+			break
+		}
+	}
+	if isRestart {
+		time.Sleep(600 * time.Millisecond)
+	}
+
 	windowTitle := "Claude モニター"
 	if !ensureSingleInstance(windowTitle) {
 		return
@@ -277,6 +289,18 @@ func main() {
 	appRoot := filepath.Join(localAppData, "ClaudeMonitor")
 	dataPath := filepath.Join(appRoot, "WebView2")
 	authDataPath := filepath.Join(appRoot, "AuthWebView2")
+
+	// ログアウト再起動時は認証データを削除してから初期化する。
+	// 旧プロセスのWebView2が解放したファイルをここで安全に削除可能。
+	if isRestart {
+		for i := 0; i < 10; i++ {
+			if err := os.RemoveAll(authDataPath); err == nil {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+
 	_ = os.MkdirAll(dataPath, 0755)
 	_ = os.MkdirAll(authDataPath, 0755)
 
@@ -331,18 +355,21 @@ func main() {
 				if !restoreWindowGeometry() {
 					moveToBottomRight()
 				}
+				applyWindowSettings := func() {
+					c := snapshotConfig()
+					setTopmost(c.Topmost)
+					setTransparent(c.Transparent)
+				}
+				applyWindowSettings()
+				// WebView2 初期化やナビゲーション完了後に topmost が外れることがあるため、
+				// 段階的に再適用して確実に反映させる。
 				time.AfterFunc(500*time.Millisecond, func() {
 					if !restoreWindowGeometry() {
 						moveToBottomRight()
 					}
+					applyWindowSettings()
 				})
-				c := snapshotConfig()
-				if c.Topmost {
-					setTopmost(true)
-				}
-				if c.Transparent {
-					setTransparent(true)
-				}
+				time.AfterFunc(2*time.Second, applyWindowSettings)
 				return
 			}
 		}
