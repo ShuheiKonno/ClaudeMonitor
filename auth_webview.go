@@ -250,6 +250,26 @@ func showAuthWebView() {
 	})
 }
 
+// logoutUser はCookieとローカルストレージをクリアして認証状態をリセットする。
+func logoutUser() {
+	if authWebViewInst != nil {
+		uiDispatch(func() {
+			authWebViewInst.Eval(`(function() {
+				document.cookie.split(';').forEach(function(c) {
+					var name = c.split('=')[0].trim();
+					['.claude.ai', 'claude.ai', '.anthropic.com', 'anthropic.com'].forEach(function(d) {
+						document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;domain=' + d + ';path=/';
+					});
+				});
+				try { localStorage.clear(); } catch(e) {}
+				try { sessionStorage.clear(); } catch(e) {}
+			})();`)
+		})
+	}
+	updateUsageError("needs_login", "ログアウトしました")
+	updateTrayFromSnapshot()
+}
+
 // hideAuthWebView はログイン完了後にオフスクリーンへ戻す。
 func hideAuthWebView() {
 	if authWebViewHandle == 0 {

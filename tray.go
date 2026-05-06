@@ -78,6 +78,7 @@ const (
 	IDM_REAUTH      = 3
 	IDM_REFRESH     = 4
 	IDM_TEST_NOTIFY = 5
+	IDM_LOGOUT      = 6
 
 	trayIconID    = 1
 	trayIconSize  = 16
@@ -215,6 +216,8 @@ func trayWndProc(hwnd, msg uintptr, wParam, lParam uintptr) uintptr {
 			}()
 		case IDM_REAUTH:
 			showAuthWebView()
+		case IDM_LOGOUT:
+			go logoutUser()
 		case IDM_TEST_NOTIFY:
 			notifyLog("test-notify menu invoked")
 			showBalloonNotification(
@@ -286,7 +289,6 @@ func showTrayMenu(hwnd uintptr) {
 	showPtr, _ := syscall.UTF16PtrFromString("表示")
 	refreshPtr, _ := syscall.UTF16PtrFromString("更新")
 	testNotifyPtr, _ := syscall.UTF16PtrFromString("テスト通知")
-	reauthPtr, _ := syscall.UTF16PtrFromString("Claude にログイン…")
 	exitPtr, _ := syscall.UTF16PtrFromString("終了")
 	procAppendMenuW.Call(menu, MF_STRING|MF_GRAYED, 0, uintptr(unsafe.Pointer(versionPtr)))
 	procAppendMenuW.Call(menu, MF_STRING|MF_GRAYED, 0, uintptr(unsafe.Pointer(copyrightPtr)))
@@ -295,7 +297,16 @@ func showTrayMenu(hwnd uintptr) {
 	procAppendMenuW.Call(menu, MF_STRING, IDM_REFRESH, uintptr(unsafe.Pointer(refreshPtr)))
 	procAppendMenuW.Call(menu, MF_STRING, IDM_TEST_NOTIFY, uintptr(unsafe.Pointer(testNotifyPtr)))
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
-	procAppendMenuW.Call(menu, MF_STRING, IDM_REAUTH, uintptr(unsafe.Pointer(reauthPtr)))
+	usageMu.Lock()
+	authState := cachedUsage.AuthState
+	usageMu.Unlock()
+	if authState == "ok" {
+		logoutPtr, _ := syscall.UTF16PtrFromString("ログアウト")
+		procAppendMenuW.Call(menu, MF_STRING, IDM_LOGOUT, uintptr(unsafe.Pointer(logoutPtr)))
+	} else {
+		reauthPtr, _ := syscall.UTF16PtrFromString("Claude にログイン…")
+		procAppendMenuW.Call(menu, MF_STRING, IDM_REAUTH, uintptr(unsafe.Pointer(reauthPtr)))
+	}
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
 	procAppendMenuW.Call(menu, MF_STRING, IDM_EXIT, uintptr(unsafe.Pointer(exitPtr)))
 
