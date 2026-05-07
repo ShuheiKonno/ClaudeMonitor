@@ -378,6 +378,20 @@ const htmlTemplate = `<!DOCTYPE html>
       <div class="bar-reset" id="reset-7d"></div>
     </div>
 
+    <div class="row-bar" id="overage-section" style="display:none">
+      <div class="row-top">
+        <span class="row-label">追加</span>
+        <div class="bar" id="overage-bar" style="display:none">
+          <div class="bar-fill" id="bar-overage" style="width:0%"></div>
+        </div>
+        <span id="overage-amount" class="bar-pct" style="flex:1;text-align:left;min-width:0"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span class="bar-reset" id="overage-limit"></span>
+        <span class="bar-reset" id="overage-reset"></span>
+      </div>
+    </div>
+
     <div class="status-row">
       <div class="status-tile" id="status-claude-ai">
         <span class="status-dot"></span>
@@ -483,6 +497,49 @@ function applyWindow(prefix, win) {
   resetEl.textContent = formatResetDateTime(win.resetsAt);
 }
 
+function formatResetDate(iso) {
+  if (!iso) return '';
+  const t = new Date(iso);
+  if (isNaN(t.getTime())) return '';
+  return '↻ ' + (t.getMonth() + 1) + '月' + t.getDate() + '日';
+}
+
+function applyOverage(overage) {
+  const section = document.getElementById('overage-section');
+  if (!overage || typeof overage.amountUsed !== 'number') {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  const amtEl = document.getElementById('overage-amount');
+  const limitEl = document.getElementById('overage-limit');
+  const resetEl = document.getElementById('overage-reset');
+  const barContainer = document.getElementById('overage-bar');
+  const barFill = document.getElementById('bar-overage');
+
+  if (overage.spendingLimit != null && overage.spendingLimit > 0) {
+    // 上限あり: プログレスバーを表示
+    barContainer.style.display = '';
+    amtEl.style.flex = '';
+    amtEl.style.textAlign = 'right';
+    amtEl.style.minWidth = '40px';
+    amtEl.textContent = '$' + overage.amountUsed.toFixed(2);
+    const pct = Math.min(100, (overage.amountUsed / overage.spendingLimit) * 100);
+    barFill.style.width = pct + '%';
+    barFill.className = 'bar-fill' + (pct >= 81 ? ' crit' : pct >= 61 ? ' warn' : '');
+    limitEl.textContent = '$' + overage.amountUsed.toFixed(2) + ' / $' + overage.spendingLimit.toFixed(2);
+  } else {
+    // 無制限: バーなしのテキスト表示
+    barContainer.style.display = 'none';
+    amtEl.style.flex = '1';
+    amtEl.style.textAlign = 'left';
+    amtEl.style.minWidth = '';
+    amtEl.textContent = '$' + overage.amountUsed.toFixed(2) + ' 使用中';
+    limitEl.textContent = '上限: 無制限';
+  }
+  resetEl.textContent = formatResetDate(overage.resetsAt);
+}
+
 let lastUpdated = null;
 let lastSnapshot = null;
 
@@ -538,6 +595,7 @@ function applySnapshot(snap) {
   lastSnapshot = snap;
   applyWindow('5h', snap.fiveHour);
   applyWindow('7d', snap.sevenDay);
+  applyOverage(snap.overage);
   renderAuthBanner(snap);
   renderAccount(snap);
   lastUpdated = snap.updatedAt;

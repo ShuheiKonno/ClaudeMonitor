@@ -56,7 +56,7 @@ const (
 	MONITOR_DEFAULTTONEAREST = 0x00000002
 
 	windowWidth  = 230
-	windowHeight = 260
+	windowHeight = 295
 )
 
 var windowHandle uintptr
@@ -306,6 +306,7 @@ func main() {
 
 	configPath = filepath.Join(appRoot, "config.json")
 	notifyLogPath = filepath.Join(appRoot, "notify.log")
+	debugLogPath = filepath.Join(appRoot, "debug.log")
 	loadConfig()
 	loadNotifyState()
 

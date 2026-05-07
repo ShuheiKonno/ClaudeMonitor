@@ -81,6 +81,8 @@ var (
 	authWebViewVisible atomic.Bool
 	authDataPath       string
 
+	debugLogPath string
+
 	// mainWebViewInst は主 UI WebView。auth 側で Dispatch すると関数が
 	// 実行されない (go-webview2 の Run ループは自分の dispatchq だけを
 	// ドレインするため) ので、UI スレッドへ寄せる用途は全てこちらの
@@ -88,6 +90,20 @@ var (
 	// auth の Win32 / Eval / Navigate を呼ぶのは安全。
 	mainWebViewInst webview2.WebView
 )
+
+// debugLog はAPIレスポンス調査用の一時デバッグログ。
+// %LOCALAPPDATA%\ClaudeMonitor\debug.log に追記する。
+func debugLog(msg string) {
+	if debugLogPath == "" {
+		return
+	}
+	f, err := os.OpenFile(debugLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), msg)
+}
 
 // uiDispatch は UI (主 WebView) スレッドへ関数を寄せる。
 // 主 WebView 未生成 (起動最序盤) の場合はインライン実行する
@@ -103,18 +119,25 @@ func uiDispatch(f func()) {
 // rawClaudeUsagePayload は JS が JSON.stringify して Bind に渡してくる構造体。
 // claude.ai の /usage と /edge-api/bootstrap/.../app_start から JS 側で抽出済み。
 type rawClaudeUsagePayload struct {
-	FiveHour      *rawClaudeWindow `json:"fiveHour"`
-	SevenDay      *rawClaudeWindow `json:"sevenDay"`
-	Email         string           `json:"email"`
-	DisplayName   string           `json:"displayName"`
-	Capabilities  []string         `json:"capabilities"`
-	RateLimitTier string           `json:"rateLimitTier"`
-	BillingType   string           `json:"billingType"`
+	FiveHour      *rawClaudeWindow   `json:"fiveHour"`
+	SevenDay      *rawClaudeWindow   `json:"sevenDay"`
+	Overage       *rawOveragePayload `json:"overage"`
+	Email         string             `json:"email"`
+	DisplayName   string             `json:"displayName"`
+	Capabilities  []string           `json:"capabilities"`
+	RateLimitTier string             `json:"rateLimitTier"`
+	BillingType   string             `json:"billingType"`
 }
 
 type rawClaudeWindow struct {
 	Utilization float64 `json:"utilization"`
 	ResetsAt    *string `json:"resetsAt"`
+}
+
+type rawOveragePayload struct {
+	AmountUsed    float64  `json:"amountUsed"`
+	SpendingLimit *float64 `json:"spendingLimit"`
+	ResetsAt      *string  `json:"resetsAt"`
 }
 
 // startAuthWebView は補助 WebView を生成し、オフスクリーン配置 + JS 注入を行う。
@@ -153,6 +176,11 @@ func startAuthWebView(dataPath string) {
 	// Xボタン (WM_CLOSE) によるアプリ終了を防ぐためウィンドウプロシージャをサブクラス化する。
 	subclassAuthWindow()
 
+	if err := aw.Bind("__debugLog", func(msg string) {
+		debugLog(msg)
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "[auth] Bind __debugLog 失敗:", err)
+	}
 	if err := aw.Bind("__postUsageData", func(jsonStr string) {
 		var p rawClaudeUsagePayload
 		if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
@@ -224,9 +252,31 @@ const authFetcherScript = `
           }
         } catch (e) { /* bootstrap パース失敗は致命傷ではない */ }
       }
+
+      // 追加使用量（従量課金 / extra_usage）を抽出する。
+      // /api/organizations/{orgId}/usage の extra_usage は次の構造:
+      //   {is_enabled, monthly_limit, used_credits, utilization, currency}
+      // ・used_credits / monthly_limit はセント単位 (347 = $3.47)
+      // ・monthly_limit が 0 / null の場合は「上限なし（無制限）」
+      // ・resets_at フィールドは無いため月初リセットを Go 側で計算する
+      let overage = null;
+      const eu = usage.extra_usage;
+      if (eu && typeof eu === 'object' && eu.is_enabled && typeof eu.used_credits === 'number') {
+        const amount = eu.used_credits / 100;
+        let limit = null;
+        if (typeof eu.monthly_limit === 'number' && eu.monthly_limit > 0) {
+          limit = eu.monthly_limit / 100;
+        }
+        // API はリセット日を返さないため、月初 (UTC) を計算で入れる。
+        const now = new Date();
+        const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
+        overage = {amountUsed: amount, spendingLimit: limit, resetsAt: reset};
+      }
+
       const payload = {
         fiveHour: usage.five_hour ? {utilization: usage.five_hour.utilization, resetsAt: usage.five_hour.resets_at} : null,
         sevenDay: usage.seven_day ? {utilization: usage.seven_day.utilization, resetsAt: usage.seven_day.resets_at} : null,
+        overage: overage,
         email: email,
         displayName: display,
         capabilities: caps,
@@ -321,6 +371,7 @@ func applyUsagePayload(p rawClaudeUsagePayload) {
 	snap := UsageSnapshot{
 		FiveHour:         mapClaudeWindow(p.FiveHour),
 		SevenDay:         mapClaudeWindow(p.SevenDay),
+		Overage:          mapOverage(p.Overage),
 		Email:            p.Email,
 		DisplayName:      p.DisplayName,
 		SubscriptionType: deriveSubscriptionType(p.Capabilities, p.RateLimitTier),
@@ -362,6 +413,24 @@ func mapClaudeWindow(w *rawClaudeWindow) UsageWindow {
 		}
 	}
 	return out
+}
+
+func mapOverage(o *rawOveragePayload) *OverageInfo {
+	if o == nil {
+		return nil
+	}
+	ov := &OverageInfo{
+		AmountUsed:    o.AmountUsed,
+		SpendingLimit: o.SpendingLimit,
+	}
+	if o.ResetsAt != nil && *o.ResetsAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, *o.ResetsAt); err == nil {
+			ov.ResetsAt = &t
+		} else if t, err := time.Parse(time.RFC3339, *o.ResetsAt); err == nil {
+			ov.ResetsAt = &t
+		}
+	}
+	return ov
 }
 
 // deriveSubscriptionType は capabilities と rate_limit_tier から表示用文字列を導く。

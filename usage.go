@@ -13,11 +13,19 @@ type UsageWindow struct {
 	ResetsAt    *time.Time `json:"resetsAt"`
 }
 
+// OverageInfo は追加使用量（従量課金）の情報を保持する。
+type OverageInfo struct {
+	AmountUsed    float64    `json:"amountUsed"`
+	SpendingLimit *float64   `json:"spendingLimit"` // nil = 無制限
+	ResetsAt      *time.Time `json:"resetsAt"`
+}
+
 // UsageSnapshot はウィジェット/トレイが参照する統合ビュー。
 // AuthState により UI がエラーバナーを出すか判断する。
 type UsageSnapshot struct {
-	FiveHour UsageWindow `json:"fiveHour"`
-	SevenDay UsageWindow `json:"sevenDay"`
+	FiveHour UsageWindow  `json:"fiveHour"`
+	SevenDay UsageWindow  `json:"sevenDay"`
+	Overage  *OverageInfo `json:"overage,omitempty"`
 
 	Email            string `json:"email"`
 	DisplayName      string `json:"displayName"`
