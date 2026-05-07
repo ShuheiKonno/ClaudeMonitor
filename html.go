@@ -542,6 +542,7 @@ function applyOverage(overage) {
 
 let lastUpdated = null;
 let lastSnapshot = null;
+let lastStatusSnap = null;
 
 function renderAuthBanner(snap) {
   const banner = document.getElementById('auth-banner');
@@ -592,6 +593,7 @@ function renderAccount(snap) {
 }
 
 function applySnapshot(snap) {
+  const prevAuthState = lastSnapshot && lastSnapshot.authState;
   lastSnapshot = snap;
   applyWindow('5h', snap.fiveHour);
   applyWindow('7d', snap.sevenDay);
@@ -600,6 +602,11 @@ function applySnapshot(snap) {
   renderAccount(snap);
   lastUpdated = snap.updatedAt;
   updateFooter();
+  // 認証状態が変化したら status-banner の表示可否を再評価する
+  // （ログイン完了時に即座に障害バナーを出す / ログアウト時に隠す）
+  if (snap.authState !== prevAuthState && lastStatusSnap) {
+    renderStatusBanner(lastStatusSnap);
+  }
 }
 
 async function fetchUsage() {
@@ -660,7 +667,11 @@ function renderStatusBanner(snap) {
   const moreEl = document.getElementById('status-banner-more');
   if (!banner) return;
   const incidents = (snap && snap.incidents) || [];
-  if (incidents.length === 0) {
+  // 未認証中（needs_login / network_error 等）は auth-banner と同時表示すると
+  // ウィンドウ高さ 260px に収まらず下部が切れるため非表示にする。
+  // authState が 'init'（初期化中）または不明な場合は判定を保留し表示しない。
+  const authOk = lastSnapshot && lastSnapshot.authState === 'ok';
+  if (incidents.length === 0 || !authOk) {
     banner.classList.remove('show', 'major', 'critical');
     return;
   }
@@ -682,9 +693,9 @@ function renderStatusBanner(snap) {
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
-    const snap = await res.json();
-    renderStatusTiles(snap.services);
-    renderStatusBanner(snap);
+    lastStatusSnap = await res.json();
+    renderStatusTiles(lastStatusSnap.services);
+    renderStatusBanner(lastStatusSnap);
   } catch (e) {
     // silently fail — tiles stay gray (unknown)
   }
