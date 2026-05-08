@@ -96,7 +96,7 @@ const htmlTemplate = `<!DOCTYPE html>
   .row-label {
     font-size: 11px;
     color: var(--fg-dim);
-    min-width: 32px;
+    width: 36px;
     flex-shrink: 0;
   }
   .bar {
@@ -528,7 +528,7 @@ function applyOverage(overage) {
     barContainer.style.display = '';
     amtEl.style.flex = '';
     amtEl.style.textAlign = 'right';
-    amtEl.style.minWidth = '40px';
+    amtEl.style.minWidth = '';
     const pctDisplay = Math.round((overage.amountUsed / overage.spendingLimit) * 100);
     amtEl.textContent = pctDisplay + '%';
     const pct = Math.min(100, (overage.amountUsed / overage.spendingLimit) * 100);
