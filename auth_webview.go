@@ -34,8 +34,8 @@ const (
 	WS_EX_APPWINDOW  = 0x00040000
 	WS_EX_TOOLWINDOW = 0x00000080
 
-	WM_CLOSE      = 0x0010
-	GWLP_WNDPROC  = -4
+	WM_CLOSE     = 0x0010
+	GWLP_WNDPROC = -4
 )
 
 // 定数で書くと const 評価で uintptr オーバーフローになるため var で保持。
@@ -387,6 +387,7 @@ func applyUsagePayload(p rawClaudeUsagePayload) {
 	}
 	updateTrayFromSnapshot()
 	handleUsageNotification(snap)
+	handleOverageNotification(snap)
 	// 主 UI のポーリング待ち (最大60秒) を回避するため、Eval で即時更新を促す。
 	// 同時に topmost / transparent をログイン直後に再適用する
 	// (WebView2 初期化やナビゲーションで z-order が外れるケースの保険)。

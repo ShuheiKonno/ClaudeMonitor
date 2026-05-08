@@ -510,6 +510,11 @@ function applyOverage(overage) {
     section.style.display = 'none';
     return;
   }
+  // amountUsed=0 かつ spendingLimit 未設定（無制限）は実質無効とみなして非表示
+  if (overage.amountUsed === 0 && overage.spendingLimit == null) {
+    section.style.display = 'none';
+    return;
+  }
   section.style.display = '';
   const amtEl = document.getElementById('overage-amount');
   const limitEl = document.getElementById('overage-limit');

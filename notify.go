@@ -41,9 +41,12 @@ var (
 
 	// 5h 使用率の通知済みフラグ。FiveHour.ResetsAt が 5h+ 飛ぶか pct=0 でリセット。
 	// アプリ再起動を跨いで重複通知を防ぐため、起動時に config から復元される。
-	notify5hResetsAt time.Time
-	notified5h60     bool
-	notified5h80     bool
+	notify5hResetsAt  time.Time
+	notified5h60      bool
+	notified5h80      bool
+	overageResetsAt   time.Time
+	notifiedOverage60 bool
+	notifiedOverage80 bool
 
 	// 通知済みインシデント ID。解決した ID は次回フェッチで削除する。
 	notifiedIncidents       = map[string]bool{}
@@ -62,18 +65,27 @@ func loadNotifyState() {
 	notify5hResetsAt = cfg.Notify5hResetsAt
 	notified5h60 = cfg.Notified5h60
 	notified5h80 = cfg.Notified5h80
+	overageResetsAt = cfg.OverageResetsAt
+	notifiedOverage60 = cfg.NotifiedOverage60
+	notifiedOverage80 = cfg.NotifiedOverage80
 }
 
 // persistNotifyState は notifyMu を保持した呼び出し元から呼ばれる前提。
-// 5h 通知のフラグ変化を config に書き出して再起動越しに維持する。
+// 使用量通知のフラグ変化を config に書き出して再起動越しに維持する。
 func persistNotifyState() {
 	resetsAt := notify5hResetsAt
 	n60 := notified5h60
 	n80 := notified5h80
+	overageAt := overageResetsAt
+	overage60 := notifiedOverage60
+	overage80 := notifiedOverage80
 	mutateConfig(func(c *Config) {
 		c.Notify5hResetsAt = resetsAt
 		c.Notified5h60 = n60
 		c.Notified5h80 = n80
+		c.OverageResetsAt = overageAt
+		c.NotifiedOverage60 = overage60
+		c.NotifiedOverage80 = overage80
 	})
 }
 
@@ -143,6 +155,71 @@ func handleUsageNotification(snap UsageSnapshot) {
 		return
 	}
 	notifyLog("usage no-fire pct=%.2f n60=%v n80=%v", pct, notified5h60, notified5h80)
+	if stateChanged {
+		persistNotifyState()
+	}
+}
+
+func handleOverageNotification(snap UsageSnapshot) {
+	if snap.AuthState != "ok" {
+		return
+	}
+	if snap.Overage == nil || snap.Overage.SpendingLimit == nil || *snap.Overage.SpendingLimit <= 0 {
+		return
+	}
+	cfg := snapshotConfig()
+	if !cfg.NotifyUsage {
+		return
+	}
+
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+
+	var resetsAt time.Time
+	if snap.Overage.ResetsAt != nil {
+		resetsAt = *snap.Overage.ResetsAt
+	}
+	pct := snap.Overage.AmountUsed / *snap.Overage.SpendingLimit * 100
+
+	stateChanged := false
+	monthChanged := !resetsAt.IsZero() && (resetsAt.Year() != overageResetsAt.Year() || resetsAt.Month() != overageResetsAt.Month())
+	if !resetsAt.Equal(overageResetsAt) {
+		overageResetsAt = resetsAt
+		stateChanged = true
+	}
+	if (monthChanged || pct == 0) && (notifiedOverage60 || notifiedOverage80) {
+		notifiedOverage60 = false
+		notifiedOverage80 = false
+		stateChanged = true
+	}
+
+	notifyLog("overage enter pct=%.2f resetsAt=%s monthChanged=%v n60=%v n80=%v",
+		pct, resetsAt.Format(time.RFC3339), monthChanged, notifiedOverage60, notifiedOverage80)
+
+	if pct >= notify5h80Threshold && !notifiedOverage80 {
+		notifiedOverage80 = true
+		notifiedOverage60 = true
+		notifyLog("overage fire 80%% pct=%.2f amount=%.2f", pct, snap.Overage.AmountUsed)
+		balloonFn(
+			"Claude モニター — 追加使用量 80%",
+			fmt.Sprintf("現在 $%.2f に達しました。上限に注意してください。", snap.Overage.AmountUsed),
+			NIIF_WARNING,
+		)
+		persistNotifyState()
+		return
+	}
+	if pct >= notify5h60Threshold && !notifiedOverage60 {
+		notifiedOverage60 = true
+		notifyLog("overage fire 60%% pct=%.2f amount=%.2f", pct, snap.Overage.AmountUsed)
+		balloonFn(
+			"Claude モニター — 追加使用量 60%",
+			fmt.Sprintf("現在 $%.2f に達しました。", snap.Overage.AmountUsed),
+			NIIF_INFO,
+		)
+		persistNotifyState()
+		return
+	}
+	notifyLog("overage no-fire pct=%.2f n60=%v n80=%v", pct, notifiedOverage60, notifiedOverage80)
 	if stateChanged {
 		persistNotifyState()
 	}
