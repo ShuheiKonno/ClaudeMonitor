@@ -123,7 +123,7 @@ const htmlTemplate = `<!DOCTYPE html>
     flex-shrink: 0;
   }
   .bar-reset {
-    font-size: 9px;
+    font-size: 11px;
     color: var(--fg-dim);
     font-variant-numeric: tabular-nums;
     text-align: right;
@@ -529,7 +529,8 @@ function applyOverage(overage) {
     amtEl.style.flex = '';
     amtEl.style.textAlign = 'right';
     amtEl.style.minWidth = '40px';
-    amtEl.textContent = '$' + overage.amountUsed.toFixed(2);
+    const pctDisplay = Math.round((overage.amountUsed / overage.spendingLimit) * 100);
+    amtEl.textContent = pctDisplay + '%';
     const pct = Math.min(100, (overage.amountUsed / overage.spendingLimit) * 100);
     barFill.style.width = pct + '%';
     barFill.className = 'bar-fill' + (pct >= 81 ? ' crit' : pct >= 61 ? ' warn' : '');
