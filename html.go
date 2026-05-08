@@ -474,7 +474,7 @@ function formatResetDateTime(iso) {
   const w = JP_WEEKDAYS[t.getDay()];
   const hh = String(t.getHours()).padStart(2, '0');
   const mm = String(t.getMinutes()).padStart(2, '0');
-  return 'リセット: ' + mo + '月' + d + '日（' + w + '）' + hh + ':' + mm;
+  return '↻ ' + mo + '月' + d + '日（' + w + '）' + hh + ':' + mm;
 }
 
 function applyWindow(prefix, win) {
