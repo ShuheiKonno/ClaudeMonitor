@@ -168,7 +168,7 @@ func handleOverageNotification(snap UsageSnapshot) {
 		return
 	}
 	cfg := snapshotConfig()
-	if !cfg.NotifyUsage {
+	if !cfg.NotifyOverage {
 		return
 	}
 

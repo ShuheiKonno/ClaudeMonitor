@@ -434,6 +434,7 @@ const htmlTemplate = `<!DOCTYPE html>
       <div class="group">
         <div class="group-title">通知</div>
         <label><input type="checkbox" id="notify-usage"> 5時間使用量 60% / 80%</label>
+        <label><input type="checkbox" id="notify-overage"> 追加使用量 60% / 80%</label>
         <label><input type="checkbox" id="notify-status"> Claude Status 障害検知</label>
       </div>
     </div>
@@ -747,6 +748,7 @@ async function openSettings() {
   document.getElementById('topmost').checked = !!s.topmost;
   document.getElementById('transparent').checked = !!s.transparent;
   document.getElementById('notify-usage').checked = !!s.notifyUsage;
+  document.getElementById('notify-overage').checked = !!s.notifyOverage;
   document.getElementById('notify-status').checked = !!s.notifyStatus;
   mainView.classList.add('hidden');
   settingsView.classList.add('active');
@@ -762,6 +764,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     topmost: document.getElementById('topmost').checked,
     transparent: document.getElementById('transparent').checked,
     notifyUsage: document.getElementById('notify-usage').checked,
+    notifyOverage: document.getElementById('notify-overage').checked,
     notifyStatus: document.getElementById('notify-status').checked,
   };
   await fetch('/api/setoption', {

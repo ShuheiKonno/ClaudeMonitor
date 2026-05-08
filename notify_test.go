@@ -299,7 +299,7 @@ func TestUsageNotify_AuthStateNotOkSkips(t *testing.T) {
 func TestOverageNotify_NoSpendingLimitSkips(t *testing.T) {
 	resetNotifyState()
 	calls := withMockBalloon(t)
-	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+	withConfig(t, func(c *Config) { c.NotifyOverage = true })
 
 	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	handleOverageNotification(snapOverage(100, nil, r))
@@ -312,7 +312,7 @@ func TestOverageNotify_NoSpendingLimitSkips(t *testing.T) {
 func TestOverageNotify_60PctFiresInfoOnce(t *testing.T) {
 	resetNotifyState()
 	calls := withMockBalloon(t)
-	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+	withConfig(t, func(c *Config) { c.NotifyOverage = true })
 
 	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	limit := overageLimit(100)
@@ -333,7 +333,7 @@ func TestOverageNotify_60PctFiresInfoOnce(t *testing.T) {
 func TestOverageNotify_80PctFiresWarningOnceAndMarks60(t *testing.T) {
 	resetNotifyState()
 	calls := withMockBalloon(t)
-	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+	withConfig(t, func(c *Config) { c.NotifyOverage = true })
 
 	r := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	limit := overageLimit(100)
@@ -361,7 +361,7 @@ func TestOverageNotify_80PctFiresWarningOnceAndMarks60(t *testing.T) {
 func TestOverageNotify_MonthChangeClearsFlagsAndRefires(t *testing.T) {
 	resetNotifyState()
 	calls := withMockBalloon(t)
-	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+	withConfig(t, func(c *Config) { c.NotifyOverage = true })
 
 	limit := overageLimit(100)
 	may := time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC)
