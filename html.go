@@ -96,7 +96,7 @@ const htmlTemplate = `<!DOCTYPE html>
   .row-label {
     font-size: 11px;
     color: var(--fg-dim);
-    min-width: 32px;
+    width: 36px;
     flex-shrink: 0;
   }
   .bar {
@@ -123,7 +123,7 @@ const htmlTemplate = `<!DOCTYPE html>
     flex-shrink: 0;
   }
   .bar-reset {
-    font-size: 9px;
+    font-size: 11px;
     color: var(--fg-dim);
     font-variant-numeric: tabular-nums;
     text-align: right;
@@ -434,6 +434,7 @@ const htmlTemplate = `<!DOCTYPE html>
       <div class="group">
         <div class="group-title">通知</div>
         <label><input type="checkbox" id="notify-usage"> 5時間使用量 60% / 80%</label>
+        <label><input type="checkbox" id="notify-overage"> 追加使用量 60% / 80%</label>
         <label><input type="checkbox" id="notify-status"> Claude Status 障害検知</label>
       </div>
     </div>
@@ -473,7 +474,7 @@ function formatResetDateTime(iso) {
   const w = JP_WEEKDAYS[t.getDay()];
   const hh = String(t.getHours()).padStart(2, '0');
   const mm = String(t.getMinutes()).padStart(2, '0');
-  return 'リセット: ' + mo + '月' + d + '日（' + w + '）' + hh + ':' + mm;
+  return '↻ ' + mo + '月' + d + '日（' + w + '）' + hh + ':' + mm;
 }
 
 function applyWindow(prefix, win) {
@@ -510,6 +511,11 @@ function applyOverage(overage) {
     section.style.display = 'none';
     return;
   }
+  // amountUsed=0 かつ spendingLimit 未設定（無制限）は実質無効とみなして非表示
+  if (overage.amountUsed === 0 && overage.spendingLimit == null) {
+    section.style.display = 'none';
+    return;
+  }
   section.style.display = '';
   const amtEl = document.getElementById('overage-amount');
   const limitEl = document.getElementById('overage-limit');
@@ -522,8 +528,9 @@ function applyOverage(overage) {
     barContainer.style.display = '';
     amtEl.style.flex = '';
     amtEl.style.textAlign = 'right';
-    amtEl.style.minWidth = '40px';
-    amtEl.textContent = '$' + overage.amountUsed.toFixed(2);
+    amtEl.style.minWidth = '';
+    const pctDisplay = Math.round((overage.amountUsed / overage.spendingLimit) * 100);
+    amtEl.textContent = pctDisplay + '%';
     const pct = Math.min(100, (overage.amountUsed / overage.spendingLimit) * 100);
     barFill.style.width = pct + '%';
     barFill.className = 'bar-fill' + (pct >= 81 ? ' crit' : pct >= 61 ? ' warn' : '');
@@ -542,6 +549,7 @@ function applyOverage(overage) {
 
 let lastUpdated = null;
 let lastSnapshot = null;
+let lastStatusSnap = null;
 
 function renderAuthBanner(snap) {
   const banner = document.getElementById('auth-banner');
@@ -592,6 +600,7 @@ function renderAccount(snap) {
 }
 
 function applySnapshot(snap) {
+  const prevAuthState = lastSnapshot && lastSnapshot.authState;
   lastSnapshot = snap;
   applyWindow('5h', snap.fiveHour);
   applyWindow('7d', snap.sevenDay);
@@ -600,6 +609,11 @@ function applySnapshot(snap) {
   renderAccount(snap);
   lastUpdated = snap.updatedAt;
   updateFooter();
+  // 認証状態が変化したら status-banner の表示可否を再評価する
+  // （ログイン完了時に即座に障害バナーを出す / ログアウト時に隠す）
+  if (snap.authState !== prevAuthState && lastStatusSnap) {
+    renderStatusBanner(lastStatusSnap);
+  }
 }
 
 async function fetchUsage() {
@@ -660,7 +674,11 @@ function renderStatusBanner(snap) {
   const moreEl = document.getElementById('status-banner-more');
   if (!banner) return;
   const incidents = (snap && snap.incidents) || [];
-  if (incidents.length === 0) {
+  // 未認証中（needs_login / network_error 等）は auth-banner と同時表示すると
+  // ウィンドウ高さ 260px に収まらず下部が切れるため非表示にする。
+  // authState が 'init'（初期化中）または不明な場合は判定を保留し表示しない。
+  const authOk = lastSnapshot && lastSnapshot.authState === 'ok';
+  if (incidents.length === 0 || !authOk) {
     banner.classList.remove('show', 'major', 'critical');
     return;
   }
@@ -682,9 +700,9 @@ function renderStatusBanner(snap) {
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
-    const snap = await res.json();
-    renderStatusTiles(snap.services);
-    renderStatusBanner(snap);
+    lastStatusSnap = await res.json();
+    renderStatusTiles(lastStatusSnap.services);
+    renderStatusBanner(lastStatusSnap);
   } catch (e) {
     // silently fail — tiles stay gray (unknown)
   }
@@ -731,6 +749,7 @@ async function openSettings() {
   document.getElementById('topmost').checked = !!s.topmost;
   document.getElementById('transparent').checked = !!s.transparent;
   document.getElementById('notify-usage').checked = !!s.notifyUsage;
+  document.getElementById('notify-overage').checked = !!s.notifyOverage;
   document.getElementById('notify-status').checked = !!s.notifyStatus;
   mainView.classList.add('hidden');
   settingsView.classList.add('active');
@@ -746,6 +765,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     topmost: document.getElementById('topmost').checked,
     transparent: document.getElementById('transparent').checked,
     notifyUsage: document.getElementById('notify-usage').checked,
+    notifyOverage: document.getElementById('notify-overage').checked,
     notifyStatus: document.getElementById('notify-status').checked,
   };
   await fetch('/api/setoption', {

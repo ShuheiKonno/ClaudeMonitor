@@ -16,16 +16,20 @@ type Config struct {
 		Height int32 `json:"height"`
 		Saved  bool  `json:"saved"`
 	} `json:"window"`
-	Topmost      bool `json:"topmost"`
-	Transparent  bool `json:"transparent"`
-	NotifyUsage  bool `json:"notifyUsage"`
-	NotifyStatus bool `json:"notifyStatus"`
+	Topmost       bool `json:"topmost"`
+	Transparent   bool `json:"transparent"`
+	NotifyUsage   bool `json:"notifyUsage"`
+	NotifyOverage bool `json:"notifyOverage"`
+	NotifyStatus  bool `json:"notifyStatus"`
 
 	// 5h 使用量通知の状態を再起動越しに保持する。
 	// 同一ウィンドウ (= 同じ ResetsAt) なら既に通知した閾値を再通知しないため。
-	Notify5hResetsAt time.Time `json:"notify5hResetsAt,omitempty"`
-	Notified5h60    bool      `json:"notified5h60,omitempty"`
-	Notified5h80    bool      `json:"notified5h80,omitempty"`
+	Notify5hResetsAt  time.Time `json:"notify5hResetsAt,omitempty"`
+	Notified5h60      bool      `json:"notified5h60,omitempty"`
+	Notified5h80      bool      `json:"notified5h80,omitempty"`
+	NotifiedOverage60 bool      `json:"notifiedOverage60,omitempty"`
+	NotifiedOverage80 bool      `json:"notifiedOverage80,omitempty"`
+	OverageResetsAt   time.Time `json:"overageResetsAt,omitempty"`
 }
 
 var (
@@ -38,6 +42,7 @@ func defaultConfig() Config {
 	var c Config
 	c.Topmost = true
 	c.NotifyUsage = true
+	c.NotifyOverage = true
 	c.NotifyStatus = true
 	return c
 }
