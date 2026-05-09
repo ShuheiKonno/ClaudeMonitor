@@ -438,6 +438,12 @@ const htmlTemplate = `<!DOCTYPE html>
         <label><input type="checkbox" id="notify-overage"> 追加使用量 60% / 80%</label>
         <label><input type="checkbox" id="notify-status"> Claude Status 障害検知</label>
       </div>
+
+      <div class="group">
+        <div class="group-title">追加使用量の表示形式</div>
+        <label><input type="radio" name="overage-tip-fmt" value="dollar" id="overage-tip-dollar"> ドル表示（$4.69）</label>
+        <label><input type="radio" name="overage-tip-fmt" value="percent" id="overage-tip-percent"> パーセント表示（9%）</label>
+      </div>
     </div>
 
     <div class="settings-footer">
@@ -752,6 +758,9 @@ async function openSettings() {
   document.getElementById('notify-usage').checked = !!s.notifyUsage;
   document.getElementById('notify-overage').checked = !!s.notifyOverage;
   document.getElementById('notify-status').checked = !!s.notifyStatus;
+  const fmt = s.overageTipFormat || 'dollar';
+  document.getElementById('overage-tip-dollar').checked = fmt === 'dollar';
+  document.getElementById('overage-tip-percent').checked = fmt === 'percent';
   mainView.classList.add('hidden');
   settingsView.classList.add('active');
 }
@@ -768,6 +777,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     notifyUsage: document.getElementById('notify-usage').checked,
     notifyOverage: document.getElementById('notify-overage').checked,
     notifyStatus: document.getElementById('notify-status').checked,
+    overageTipFormat: document.querySelector('input[name="overage-tip-fmt"]:checked')?.value || 'dollar',
   };
   await fetch('/api/setoption', {
     method: 'POST',

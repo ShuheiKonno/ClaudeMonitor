@@ -347,6 +347,20 @@ func updateTrayFromSnapshot() {
 		return
 	}
 	tip := fmt.Sprintf("Claude モニター\n5h: %d%% / 7d: %d%%", pct5h, pct7d)
+	if ov := snap.Overage; ov != nil && (ov.AmountUsed > 0 || ov.SpendingLimit != nil) {
+		cfg := snapshotConfig()
+		var ovStr string
+		if cfg.OverageTipFormat == "percent" && ov.SpendingLimit != nil && *ov.SpendingLimit > 0 {
+			pct := int(math.Round(ov.AmountUsed / *ov.SpendingLimit * 100))
+			if pct > 100 {
+				pct = 100
+			}
+			ovStr = fmt.Sprintf("%d%%", pct)
+		} else {
+			ovStr = fmt.Sprintf("$%.2f", ov.AmountUsed)
+		}
+		tip += " / Eu: " + ovStr
+	}
 	setTrayIcon(hIcon, tip)
 }
 
