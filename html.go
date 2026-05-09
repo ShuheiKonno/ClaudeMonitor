@@ -13,8 +13,8 @@ const htmlTemplate = `<!DOCTYPE html>
 <style>
   :root {
     --bg-grad: linear-gradient(135deg, #0a0a0d 0%, #15161c 100%);
-    --fg: #e7e8ee;
-    --fg-dim: #8a8d99;
+    --fg: #ffffff;
+    --fg-dim: #b8bcc8;
     --accent: #8b9eff;
     --card: rgba(255,255,255,0.035);
     --border: rgba(255,255,255,0.06);
@@ -128,6 +128,7 @@ const htmlTemplate = `<!DOCTYPE html>
     font-variant-numeric: tabular-nums;
     text-align: right;
   }
+  #overage-limit { font-weight: 600; }
 
   /* ステータスタイル */
   .status-row {
