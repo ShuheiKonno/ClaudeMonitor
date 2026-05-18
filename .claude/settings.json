@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'echo \"$CLAUDE_TOOL_INPUT\" | grep -q \"\\.go\" && echo \">> go test ./...\" && go test ./... 2>&1 | tail -20; exit 0'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'echo \"$CLAUDE_TOOL_INPUT\" | grep -q \"rsrc_windows_amd64\" && echo \"ERROR: rsrc_windows_amd64.syso は goversioninfo で生成してください (versioninfo.json -> goversioninfo コマンドを使用)\" >&2 && exit 2; exit 0'"
+          }
+        ]
+      }
+    ]
+  }
+}
