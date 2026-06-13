@@ -10,3 +10,7 @@ Thumbs.db
 
 # Local Claude Code config
 .claude/settings.local.json
+
+# Local-only scratch / tooling (not part of the app)
+.firecrawl/
+tools/
