@@ -34,8 +34,21 @@ var (
 	statusMu        sync.RWMutex
 	cachedStatus    StatusSnapshot
 	lastStatusFetch time.Time
-	statusCacheTTL  = 5 * time.Minute
 )
+
+// statusPollInterval は設定された障害監視間隔を返す（clampPollSeconds で [60,3600] 秒）。
+func statusPollInterval() time.Duration {
+	return time.Duration(clampPollSeconds(snapshotConfig().StatusPollSeconds)) * time.Second
+}
+
+// statusCacheTTL はキャッシュ有効期限を返す。間隔そのものではなく 90% にするのが要点。
+// JS の setInterval(間隔) と同値にすると、time.Since(lastStatusFetch) < TTL の strict 比較 +
+// フェッチ完了後に lastStatusFetch を打つ位相ずれで、JS ポーリングの約半数がキャッシュ返却となり
+// 実効再取得間隔が約2倍になる。間隔よりわずかに短くすれば毎回の JS ポーリングが確実に再取得する。
+// TTL の役割は「手動更新と定期ポーリングが近接したときの重複取得防止」に限定される。
+func statusCacheTTL() time.Duration {
+	return statusPollInterval() * 9 / 10
+}
 
 // exact component names from https://status.claude.com/api/v2/summary.json
 var statusTargets = []string{
@@ -188,13 +201,18 @@ func severity(status string) int {
 
 func getStatusSnapshot() StatusSnapshot {
 	statusMu.RLock()
-	if !lastStatusFetch.IsZero() && time.Since(lastStatusFetch) < statusCacheTTL {
+	if !lastStatusFetch.IsZero() && time.Since(lastStatusFetch) < statusCacheTTL() {
 		snap := cachedStatus
 		statusMu.RUnlock()
 		return snap
 	}
 	statusMu.RUnlock()
 
+	// 取得「開始」時刻を基準にする。完了時刻で記録すると、フェッチ所要時間の分だけ
+	// 次回 TTL 判定が後ろにずれ、設定間隔と同程度の遅延（例: 60秒設定で取得に数秒）でも
+	// キャッシュが返り実効再取得間隔が約2倍になりうる。開始時刻基準なら所要時間に依存せず、
+	// 設定間隔ごとに確実に再取得される。
+	fetchStart := time.Now()
 	snap, err := fetchServiceStatus()
 	if err != nil {
 		statusMu.RLock()
@@ -212,7 +230,7 @@ func getStatusSnapshot() StatusSnapshot {
 
 	statusMu.Lock()
 	cachedStatus = snap
-	lastStatusFetch = time.Now()
+	lastStatusFetch = fetchStart
 	statusMu.Unlock()
 	handleStatusNotification(snap)
 	return snap

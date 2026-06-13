@@ -77,8 +77,8 @@ Go バックグラウンド (usage.go)
 | `config.go` | `%LOCALAPPDATA%\ClaudeMonitor\config.json` の読み書き |
 | `tray.go` | システムトレイアイコンの動的レンダリング（golang.org/x/image で円グラフを描画） |
 | `notify.go` | 使用量閾値通知（5h: 60%/80%）と status.claude.com インシデント通知 |
-| `status.go` | status.claude.com/api/v2/summary.json を5分キャッシュでポーリング |
-| `usage.go` | 使用量スナップショット管理、5分間隔のバックグラウンドコレクター |
+| `status.go` | status.claude.com/api/v2/summary.json をキャッシュ付きでポーリング（間隔は設定可能、既定5分） |
+| `usage.go` | 使用量スナップショット管理、バックグラウンドコレクター（間隔は設定可能、既定5分） |
 | `html.go` | ウィジェットUIのHTML/CSS/JS（バイナリに埋め込み） |
 | `cmd/genicon/` | `assets/icon.ico` の生成ユーティリティ |
 

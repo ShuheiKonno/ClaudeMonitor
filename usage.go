@@ -49,7 +49,36 @@ var (
 	// refreshNotifyMu で保護され、refreshUsage 開始時に作成・終了時に nil 化される。
 	refreshNotifyMu sync.Mutex
 	refreshNotify   chan struct{}
+
+	// usageIntervalReset は設定変更時に startCollector の ticker を張り直す合図。
+	// バッファ 1 のためノンブロッキング送信でよい（連続変更は最新値で1回 Reset されれば十分）。
+	usageIntervalReset = make(chan struct{}, 1)
 )
+
+// usagePollInterval は設定された使用量取得間隔を返す。
+// clampPollSeconds により 0/範囲外でも [60,3600] 秒に収まるため、
+// time.NewTicker / Ticker.Reset の「間隔 <= 0 で panic」を確実に回避する。
+func usagePollInterval() time.Duration {
+	return time.Duration(clampPollSeconds(snapshotConfig().UsagePollSeconds)) * time.Second
+}
+
+// applyUsagePollInterval は使用量取得間隔の変更を即時反映する。
+// (1) Go ticker をノンブロッキングにリセット合図、(2) 認証 WebView の
+// バックアップタイマーを Eval で張り直す（使用量間隔に追従させ二重保険を維持）。
+// sec は clampPollSeconds 済みの値を渡す前提。
+func applyUsagePollInterval(sec int) {
+	select {
+	case usageIntervalReset <- struct{}{}:
+	default:
+	}
+	if authWebViewInst != nil {
+		ms := sec * 1000
+		uiDispatch(func() {
+			authWebViewInst.Eval(fmt.Sprintf(
+				"window.__setUsageInterval && window.__setUsageInterval(%d)", ms))
+		})
+	}
+}
 
 // refreshUsage は補助 WebView の JS に取得をリクエストし、Bind コールバック完了まで待つ。
 // 並行呼び出しは refreshMu で直列化される。タイムアウトは 15 秒。
@@ -121,10 +150,16 @@ func startCollector() {
 	usageMu.Unlock()
 
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(usagePollInterval())
 		defer ticker.Stop()
-		for range ticker.C {
-			refreshUsage()
+		for {
+			select {
+			case <-ticker.C:
+				refreshUsage()
+			case <-usageIntervalReset:
+				// 設定保存で間隔が変わったら新しい値で張り直す。
+				ticker.Reset(usagePollInterval())
+			}
 		}
 	}()
 }

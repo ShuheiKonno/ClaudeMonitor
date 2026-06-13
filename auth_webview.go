@@ -205,6 +205,15 @@ func startAuthWebView(dataPath string) {
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "[auth] Bind __postFetchError 失敗:", err)
 	}
+	// バックアップタイマーの間隔（ミリ秒）を JS から問い合わせるための Bind。
+	// Init スクリプトはドキュメント生成（再ナビゲーション含む）毎に再実行されるため、
+	// 固定値を埋め込むと再ログイン後に起動時の値へ戻ってしまう。常に最新の設定値を
+	// 返すことで、新規ドキュメントでも変更後の間隔を維持する。
+	if err := aw.Bind("__getUsageIntervalMs", func() int64 {
+		return int64(usagePollInterval() / time.Millisecond)
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "[auth] Bind __getUsageIntervalMs 失敗:", err)
+	}
 
 	aw.Init(authFetcherScript)
 	aw.Navigate("https://claude.ai/settings/usage")
@@ -291,8 +300,20 @@ const authFetcherScript = `
   window.__fetchClaudeUsage = fetchClaudeUsage;
   // ナビゲーション直後はリダイレクトと cookie 反映を待つために 1.5s 遅延
   setTimeout(fetchClaudeUsage, 1500);
-  // バックアップタイマー (Go 側 ticker と二重保険)
-  setInterval(fetchClaudeUsage, 5 * 60 * 1000);
+  // バックアップタイマー (Go 側 ticker と二重保険)。
+  // まず安全な既定値で起動し、直後に Go へ最新の設定間隔を問い合わせて上書きする。
+  // この Init はドキュメント生成（再ナビゲーション含む）毎に走るため、再ログイン後も
+  // 常に最新値へ収束する。設定変更時は Go が __setUsageInterval(ms) を Eval で呼ぶ。
+  let __usageTimer = setInterval(fetchClaudeUsage, 5 * 60 * 1000);
+  window.__setUsageInterval = function(ms) {
+    if (__usageTimer) clearInterval(__usageTimer);
+    __usageTimer = setInterval(fetchClaudeUsage, ms);
+  };
+  if (window.__getUsageIntervalMs) {
+    window.__getUsageIntervalMs().then(function(ms) {
+      if (ms > 0) window.__setUsageInterval(ms);
+    }).catch(function() {});
+  }
 })();
 `
 

@@ -334,6 +334,31 @@ const htmlTemplate = `<!DOCTYPE html>
     line-height: 1.3;
   }
   .settings .account b { color: var(--fg); font-weight: 600; font-size: 11px; }
+  .settings .poll-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .settings .poll-row + .poll-row { margin-top: 3px; }
+  .settings .poll-label { font-size: 11px; }
+  .settings .poll-input {
+    width: 64px;
+    padding: 2px 4px;
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--fg);
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .settings .poll-note {
+    font-size: 9px;
+    color: var(--fg-dim);
+    margin-top: 3px;
+  }
 </style>
 </head>
 <body>
@@ -443,6 +468,19 @@ const htmlTemplate = `<!DOCTYPE html>
         <div class="group-title">追加使用量の表示形式</div>
         <label><input type="radio" name="overage-tip-fmt" value="dollar" id="overage-tip-dollar"> ドル表示（$4.69）</label>
         <label><input type="radio" name="overage-tip-fmt" value="percent" id="overage-tip-percent"> パーセント表示（9%）</label>
+      </div>
+
+      <div class="group">
+        <div class="group-title">ポーリング間隔（秒）</div>
+        <div class="poll-row">
+          <span class="poll-label">使用量取得</span>
+          <input type="number" id="poll-usage" class="poll-input" min="60" max="3600" step="10">
+        </div>
+        <div class="poll-row">
+          <span class="poll-label">障害監視</span>
+          <input type="number" id="poll-status" class="poll-input" min="60" max="3600" step="10">
+        </div>
+        <div class="poll-note">60〜3600秒。範囲外は自動調整されます。</div>
       </div>
     </div>
 
@@ -761,6 +799,8 @@ async function openSettings() {
   const fmt = s.overageTipFormat || 'dollar';
   document.getElementById('overage-tip-dollar').checked = fmt === 'dollar';
   document.getElementById('overage-tip-percent').checked = fmt === 'percent';
+  document.getElementById('poll-usage').value = s.usagePollSeconds || 300;
+  document.getElementById('poll-status').value = s.statusPollSeconds || 300;
   mainView.classList.add('hidden');
   settingsView.classList.add('active');
 }
@@ -770,6 +810,13 @@ function closeSettings() {
 }
 document.getElementById('btn-settings').addEventListener('click', openSettings);
 document.getElementById('btn-cancel').addEventListener('click', closeSettings);
+// clampPoll は秒値を [60,3600] に収める（サーバ側と同じ規則の UX 用フロント検証）。
+function clampPoll(v) {
+  v = parseInt(v, 10);
+  if (isNaN(v) || v < 60) return 60;
+  if (v > 3600) return 3600;
+  return v;
+}
 document.getElementById('btn-save').addEventListener('click', async () => {
   const payload = {
     topmost: document.getElementById('topmost').checked,
@@ -778,12 +825,20 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     notifyOverage: document.getElementById('notify-overage').checked,
     notifyStatus: document.getElementById('notify-status').checked,
     overageTipFormat: document.querySelector('input[name="overage-tip-fmt"]:checked')?.value || 'dollar',
+    usagePollSeconds: clampPoll(document.getElementById('poll-usage').value),
+    statusPollSeconds: clampPoll(document.getElementById('poll-status').value),
   };
-  await fetch('/api/setoption', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload),
-  });
+  let applied = payload;
+  try {
+    const res = await fetch('/api/setoption', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    // 戻り値（サーバでクランプ済）を正として障害ポーリングを張り直す。
+    applied = await res.json();
+  } catch (e) {}
+  startStatusPolling(applied.statusPollSeconds || 300);
   closeSettings();
   fetchUsage();
 });
@@ -814,9 +869,24 @@ function schedulePoll() {
     fetchUsage().finally(schedulePoll);
   }, fast ? 2000 : 60000);
 }
+// 障害監視ポーリングは設定値で間隔可変。clearInterval で張り直せるよう ID を保持する。
+let statusTimer = null;
+function startStatusPolling(sec) {
+  if (statusTimer) clearInterval(statusTimer);
+  statusTimer = setInterval(fetchStatus, (sec || 300) * 1000);
+}
+async function initStatusPolling() {
+  let sec = 300;
+  try {
+    const s = await (await fetch('/api/settings')).json();
+    if (s.statusPollSeconds) sec = s.statusPollSeconds;
+  } catch (e) {}
+  startStatusPolling(sec);
+}
+
 fetchUsage().finally(schedulePoll);
 fetchStatus();
-setInterval(fetchStatus, 300000);
+initStatusPolling();
 setInterval(updateFooter, 5000);
 </script>
 </body>
