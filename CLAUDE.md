@@ -32,6 +32,25 @@ goversioninfo -icon assets/icon.ico -o rsrc_windows_amd64.syso
 go build -ldflags "-H windowsgui -X main.AppVersion=v0.9.3" -o ClaudeMonitor.exe .
 ```
 
+## 作業フロー（コーディング〜リリース）
+
+機能追加・修正を行ったら以下を順番に実施すること。特に **②Codexレビュー・③バージョン更新・④リリース** を忘れない（過去に①の直後にコミット／PRだけ行い、②〜④を飛ばして古いバージョン番号のままになった事例がある）。
+
+1. **実装・テスト**: `go test ./...` と `go build` が通ることを確認。可能ならアプリを起動して実機確認する（GUI 動作は WebView2 + claude.ai ログインが必要なため、`/api/settings` 等の localhost API で確認できる部分は curl 相当で確認するとよい）。
+2. **Codexレビュー**: `/codex:review`（より厳しめなら `/codex:adversarial-review`）でレビューし、指摘（特に P1/P2）を修正してから次へ進む。レビューは変更をコミット済みの状態で実行する。
+3. **バージョン番号の更新**: リリースするなら必ずバージョンを上げる。`release` スキル（`.claude/skills/release/`）を使うのが基本。手動の場合は以下 3 箇所を**同じ番号**に揃える:
+   - `versioninfo.json` の `FileVersion` / `ProductVersion`（数値構造体と文字列の両方）
+   - `CLAUDE.md` のビルドコマンド `-X main.AppVersion=vX.Y.Z`（2 箇所）
+   - `goversioninfo` で `rsrc_windows_amd64.syso` を再生成
+   - 注: `version.go` の `var AppVersion = "dev"` は ldflags で上書きされる既定値なので変更しない。
+   - **バンプは機能の PR に含めるか、機能 PR のマージ前に行う**（別 PR に分かれて main に取り込まれ損ねるのを防ぐ）。
+4. **リリース**: バージョンを上げた main から実施する。
+   - リリースビルド: `go build -ldflags "-H windowsgui -X main.AppVersion=vX.Y.Z" -o ClaudeMonitor.exe .`
+   - 生成 exe の埋め込みバージョンが目的の番号になっているか確認（`(Get-Item ClaudeMonitor.exe).VersionInfo`）。
+   - タグ `vX.Y.Z` と GitHub Release を作成し、**`ClaudeMonitor.exe` を必ず添付**する。
+     例: `gh release create vX.Y.Z --target main --title "vX.Y.Z — <短い説明>" --notes-file <notes> ClaudeMonitor.exe`
+   - Release タイトルは `vX.Y.Z — <短い説明>`、本文は `## 変更内容` 形式（既存リリースを踏襲）。
+
 ## アーキテクチャ
 
 ### 全体構成
