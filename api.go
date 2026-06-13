@@ -25,12 +25,14 @@ func openExternalURL(url string) {
 }
 
 type settingsPayload struct {
-	Topmost          bool   `json:"topmost"`
-	Transparent      bool   `json:"transparent"`
-	NotifyUsage      bool   `json:"notifyUsage"`
-	NotifyOverage    bool   `json:"notifyOverage"`
-	NotifyStatus     bool   `json:"notifyStatus"`
-	OverageTipFormat string `json:"overageTipFormat"`
+	Topmost           bool   `json:"topmost"`
+	Transparent       bool   `json:"transparent"`
+	NotifyUsage       bool   `json:"notifyUsage"`
+	NotifyOverage     bool   `json:"notifyOverage"`
+	NotifyStatus      bool   `json:"notifyStatus"`
+	OverageTipFormat  string `json:"overageTipFormat"`
+	UsagePollSeconds  int    `json:"usagePollSeconds"`
+	StatusPollSeconds int    `json:"statusPollSeconds"`
 }
 
 func startServer() (int, error) {
@@ -53,12 +55,14 @@ func startServer() (int, error) {
 	mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
 		cfg := snapshotConfig()
 		writeJSON(w, settingsPayload{
-			Topmost:          cfg.Topmost,
-			Transparent:      cfg.Transparent,
-			NotifyUsage:      cfg.NotifyUsage,
-			NotifyOverage:    cfg.NotifyOverage,
-			NotifyStatus:     cfg.NotifyStatus,
-			OverageTipFormat: cfg.OverageTipFormat,
+			Topmost:           cfg.Topmost,
+			Transparent:       cfg.Transparent,
+			NotifyUsage:       cfg.NotifyUsage,
+			NotifyOverage:     cfg.NotifyOverage,
+			NotifyStatus:      cfg.NotifyStatus,
+			OverageTipFormat:  cfg.OverageTipFormat,
+			UsagePollSeconds:  cfg.UsagePollSeconds,
+			StatusPollSeconds: cfg.StatusPollSeconds,
 		})
 	})
 
@@ -68,6 +72,9 @@ func startServer() (int, error) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		// ポーリング間隔はサーバ側クランプを正とする（panic 防止 + UX バリデーションの最終防衛線）。
+		usageSec := clampPollSeconds(p.UsagePollSeconds)
+		statusSec := clampPollSeconds(p.StatusPollSeconds)
 		mutateConfig(func(c *Config) {
 			c.Topmost = p.Topmost
 			c.Transparent = p.Transparent
@@ -75,10 +82,17 @@ func startServer() (int, error) {
 			c.NotifyOverage = p.NotifyOverage
 			c.NotifyStatus = p.NotifyStatus
 			c.OverageTipFormat = p.OverageTipFormat
+			c.UsagePollSeconds = usageSec
+			c.StatusPollSeconds = statusSec
 		})
 		setTopmost(p.Topmost)
 		setTransparent(p.Transparent)
-		writeJSON(w, map[string]any{"ok": true})
+		applyUsagePollInterval(usageSec)
+		// 障害監視間隔は statusCacheTTL() が動的に config を読むため Go 側追加処理は不要。
+		// JS 側が戻り値を使って setInterval を張り直す。
+		p.UsagePollSeconds = usageSec
+		p.StatusPollSeconds = statusSec
+		writeJSON(w, p)
 	})
 
 	mux.HandleFunc("/api/refresh", func(w http.ResponseWriter, r *http.Request) {
