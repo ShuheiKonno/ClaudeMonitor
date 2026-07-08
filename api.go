@@ -33,6 +33,7 @@ type settingsPayload struct {
 	OverageTipFormat  string `json:"overageTipFormat"`
 	UsagePollSeconds  int    `json:"usagePollSeconds"`
 	StatusPollSeconds int    `json:"statusPollSeconds"`
+	TraySplitDays     int    `json:"traySplitDays"`
 }
 
 func startServer() (int, error) {
@@ -63,6 +64,7 @@ func startServer() (int, error) {
 			OverageTipFormat:  cfg.OverageTipFormat,
 			UsagePollSeconds:  cfg.UsagePollSeconds,
 			StatusPollSeconds: cfg.StatusPollSeconds,
+			TraySplitDays:     cfg.TraySplitDays,
 		})
 	})
 
@@ -75,6 +77,7 @@ func startServer() (int, error) {
 		// ポーリング間隔はサーバ側クランプを正とする（panic 防止 + UX バリデーションの最終防衛線）。
 		usageSec := clampPollSeconds(p.UsagePollSeconds)
 		statusSec := clampPollSeconds(p.StatusPollSeconds)
+		splitDays := normalizeTraySplitDays(p.TraySplitDays)
 		mutateConfig(func(c *Config) {
 			c.Topmost = p.Topmost
 			c.Transparent = p.Transparent
@@ -84,6 +87,7 @@ func startServer() (int, error) {
 			c.OverageTipFormat = p.OverageTipFormat
 			c.UsagePollSeconds = usageSec
 			c.StatusPollSeconds = statusSec
+			c.TraySplitDays = splitDays
 		})
 		setTopmost(p.Topmost)
 		setTransparent(p.Transparent)
@@ -92,6 +96,7 @@ func startServer() (int, error) {
 		// JS 側が戻り値を使って setInterval を張り直す。
 		p.UsagePollSeconds = usageSec
 		p.StatusPollSeconds = statusSec
+		p.TraySplitDays = splitDays
 		writeJSON(w, p)
 	})
 
