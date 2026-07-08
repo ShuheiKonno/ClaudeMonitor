@@ -16,11 +16,14 @@ func TestDumpTrayPreview(t *testing.T) {
 		t.Skip("DUMP_TRAY_PREVIEW=1 で有効化")
 	}
 	samples := []struct {
-		pct5h, pct7d int
+		pct5h int
+		band  trayBand
 	}{
-		{25, 30},
-		{68, 65},
-		{95, 92},
+		{25, trayBandGreen},
+		{56, trayBandGreen}, // 5/6 の判読性確認用
+		{68, trayBandAmber},
+		{95, trayBandRed},
+		{100, trayBandRed}, // 3 桁コンパクト描画の確認用
 	}
 	sz := trayIconSize
 	scale := 8
@@ -42,7 +45,7 @@ func TestDumpTrayPreview(t *testing.T) {
 	}
 	xpos := pad
 	for _, s := range samples {
-		img := drawTrayIconImage(s.pct5h, s.pct7d)
+		img := drawTrayIconImage(s.pct5h, s.band)
 		draw.Draw(out, image.Rect(xpos, pad, xpos+sz, pad+sz), img, image.Point{}, draw.Over)
 		scaled := image.NewRGBA(image.Rect(0, 0, sz*scale, sz*scale))
 		for y := 0; y < sz; y++ {
