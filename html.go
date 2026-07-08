@@ -471,6 +471,13 @@ const htmlTemplate = `<!DOCTYPE html>
       </div>
 
       <div class="group">
+        <div class="group-title">7日使用量アイコンの配色ペース</div>
+        <label><input type="radio" name="tray-split" value="7" id="tray-split-7"> 7日分割（既定・7日かけて満タン）</label>
+        <label><input type="radio" name="tray-split" value="5" id="tray-split-5"> 5日分割（5日で満タン・早めに警告色）</label>
+        <label><input type="radio" name="tray-split" value="0" id="tray-split-0"> 分割なし（固定 60% / 80%）</label>
+      </div>
+
+      <div class="group">
         <div class="group-title">ポーリング間隔（秒）</div>
         <div class="poll-row">
           <span class="poll-label">使用量取得</span>
@@ -799,6 +806,10 @@ async function openSettings() {
   const fmt = s.overageTipFormat || 'dollar';
   document.getElementById('overage-tip-dollar').checked = fmt === 'dollar';
   document.getElementById('overage-tip-percent').checked = fmt === 'percent';
+  const traySplit = s.traySplitDays ?? 7;
+  document.getElementById('tray-split-7').checked = traySplit === 7;
+  document.getElementById('tray-split-5').checked = traySplit === 5;
+  document.getElementById('tray-split-0').checked = traySplit === 0;
   document.getElementById('poll-usage').value = s.usagePollSeconds || 300;
   document.getElementById('poll-status').value = s.statusPollSeconds || 300;
   mainView.classList.add('hidden');
@@ -825,6 +836,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     notifyOverage: document.getElementById('notify-overage').checked,
     notifyStatus: document.getElementById('notify-status').checked,
     overageTipFormat: document.querySelector('input[name="overage-tip-fmt"]:checked')?.value || 'dollar',
+    traySplitDays: parseInt(document.querySelector('input[name="tray-split"]:checked')?.value ?? '7', 10),
     usagePollSeconds: clampPoll(document.getElementById('poll-usage').value),
     statusPollSeconds: clampPoll(document.getElementById('poll-status').value),
   };

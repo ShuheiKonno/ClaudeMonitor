@@ -23,6 +23,10 @@ type Config struct {
 	NotifyStatus     bool   `json:"notifyStatus"`
 	OverageTipFormat string `json:"overageTipFormat"` // "dollar" | "percent"
 
+	// TraySplitDays は 7 日ウィンドウ配色のペース基準日数。
+	// 7 = 7日フル（既定、現状動作）、5 = 5日で閾値到達（早期警告）、0 = 分割なし（固定 60/80%しきい値）。
+	TraySplitDays int `json:"traySplitDays"`
+
 	// ポーリング間隔（秒）。使用量取得と障害監視で個別に設定可能。
 	// 範囲は [minPollSeconds, maxPollSeconds] にクランプされる（0/欠落は既定値扱い）。
 	UsagePollSeconds  int `json:"usagePollSeconds"`
@@ -61,6 +65,16 @@ func clampPollSeconds(v int) int {
 	return v
 }
 
+// normalizeTraySplitDays は 7/5/0 以外の値（旧バージョンの欠損値や不正値）を既定の 7 に丸める。
+func normalizeTraySplitDays(v int) int {
+	switch v {
+	case 0, 5, 7:
+		return v
+	default:
+		return 7
+	}
+}
+
 var (
 	configMu   sync.Mutex
 	configPath string
@@ -76,6 +90,7 @@ func defaultConfig() Config {
 	c.OverageTipFormat = "dollar"
 	c.UsagePollSeconds = defaultPollSeconds
 	c.StatusPollSeconds = defaultPollSeconds
+	c.TraySplitDays = 7
 	return c
 }
 
@@ -97,6 +112,7 @@ func loadConfig() {
 	// 手編集や旧バージョンで present-and-0 / 範囲外になっていても安全側へ矯正する。
 	tmp.UsagePollSeconds = clampPollSeconds(tmp.UsagePollSeconds)
 	tmp.StatusPollSeconds = clampPollSeconds(tmp.StatusPollSeconds)
+	tmp.TraySplitDays = normalizeTraySplitDays(tmp.TraySplitDays)
 	config = tmp
 }
 

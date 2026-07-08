@@ -329,17 +329,18 @@ const (
 )
 
 // trayPaceThresholds は 7 日ウィンドウの経過割合に応じてスケールした配色閾値（黄, 赤）を返す。
-// 使用率が「経過時間ぶんの許容ペース」を超えているかで警告するため、60%/80% を経過割合で線形に縮める
-// （例: 2 日経過なら 黄 60×2/7≈17.1% / 赤 80×2/7≈22.9%）。
-func trayPaceThresholds(resetsAt *time.Time, now time.Time) (yellow, red float64) {
-	const total = 7 * 24 * time.Hour
-	const minElapsed = 12 * time.Hour // リセット直後は閾値がほぼ 0 になり色がちらつくため床を設ける
-	if resetsAt == nil {
-		return 60, 80 // リセット時刻不明時は従来の固定閾値にフォールバック
+// 使用率が「経過時間ぶんの許容ペース」を超えているかで警告するため、60%/80% を経過割合で線形に縮める。
+// splitDays はペース基準日数（7/5）。0 の場合はスケーリングせず固定 60/80 を返す（「分割なし」設定）。
+func trayPaceThresholds(resetsAt *time.Time, now time.Time, splitDays int) (yellow, red float64) {
+	const windowTotal = 7 * 24 * time.Hour // 実際のリセットウィンドウ長（常に7日固定）
+	const minElapsed = 12 * time.Hour      // リセット直後は閾値がほぼ0になり色がちらつくため床を設ける
+	if resetsAt == nil || splitDays <= 0 {
+		return 60, 80 // リセット時刻不明 or 「分割なし」設定時は固定閾値
 	}
-	elapsed := now.Sub(resetsAt.Add(-total))
-	elapsed = min(max(elapsed, minElapsed), total) // 7 日超・時計ずれによる負値も吸収
-	frac := float64(elapsed) / float64(total)
+	paceTotal := time.Duration(splitDays) * 24 * time.Hour
+	elapsed := now.Sub(resetsAt.Add(-windowTotal))
+	elapsed = min(max(elapsed, minElapsed), paceTotal) // ペース基準日数超・時計ずれによる負値も吸収
+	frac := float64(elapsed) / float64(paceTotal)
 	return 60 * frac, 80 * frac
 }
 
@@ -376,9 +377,10 @@ func updateTrayFromSnapshot() {
 		setTrayIcon(hIcon, trayTooltipForError(snap))
 		return
 	}
+	cfg := snapshotConfig()
 	pct5h := clampPct(snap.FiveHour.Utilization)
 	pct7d := clampPct(snap.SevenDay.Utilization)
-	yellow, red := trayPaceThresholds(snap.SevenDay.ResetsAt, time.Now())
+	yellow, red := trayPaceThresholds(snap.SevenDay.ResetsAt, time.Now(), cfg.TraySplitDays)
 	band := trayBandFor(snap.SevenDay.Utilization, yellow, red)
 	hIcon := generateTrayIcon(pct5h, band)
 	if hIcon == 0 {
@@ -386,7 +388,7 @@ func updateTrayFromSnapshot() {
 	}
 	tip := fmt.Sprintf("Claude モニター\n5h: %d%% / 7d: %d%%", pct5h, pct7d)
 	if ov := snap.Overage; ov != nil && (ov.AmountUsed > 0 || ov.SpendingLimit != nil) {
-		cfg := snapshotConfig()
+		// cfg は既に上で取得済みなのでここで再度 snapshotConfig() を呼ばない
 		var ovStr string
 		if cfg.OverageTipFormat == "percent" && ov.SpendingLimit != nil && *ov.SpendingLimit > 0 {
 			pct := int(math.Round(ov.AmountUsed / *ov.SpendingLimit * 100))
