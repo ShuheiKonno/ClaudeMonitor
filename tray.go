@@ -319,6 +319,42 @@ func showTrayMenu(hwnd uintptr) {
 	procDestroyMenu.Call(menu)
 }
 
+// trayBand はトレイアイコンの配色バンド（7 日ウィンドウのペース判定結果）。
+type trayBand int
+
+const (
+	trayBandGreen trayBand = iota
+	trayBandAmber
+	trayBandRed
+)
+
+// trayPaceThresholds は 7 日ウィンドウの経過割合に応じてスケールした配色閾値（黄, 赤）を返す。
+// 使用率が「経過時間ぶんの許容ペース」を超えているかで警告するため、60%/80% を経過割合で線形に縮める
+// （例: 2 日経過なら 黄 60×2/7≈17.1% / 赤 80×2/7≈22.9%）。
+func trayPaceThresholds(resetsAt *time.Time, now time.Time) (yellow, red float64) {
+	const total = 7 * 24 * time.Hour
+	const minElapsed = 12 * time.Hour // リセット直後は閾値がほぼ 0 になり色がちらつくため床を設ける
+	if resetsAt == nil {
+		return 60, 80 // リセット時刻不明時は従来の固定閾値にフォールバック
+	}
+	elapsed := now.Sub(resetsAt.Add(-total))
+	elapsed = min(max(elapsed, minElapsed), total) // 7 日超・時計ずれによる負値も吸収
+	frac := float64(elapsed) / float64(total)
+	return 60 * frac, 80 * frac
+}
+
+// trayBandFor は 7 日使用率とペース閾値から配色バンドを決める。
+func trayBandFor(utilization, yellow, red float64) trayBand {
+	switch {
+	case utilization > red:
+		return trayBandRed
+	case utilization > yellow:
+		return trayBandAmber
+	default:
+		return trayBandGreen
+	}
+}
+
 // clampPct はサーバから返る float の使用率を表示用の整数 % に丸める（0–100 にクランプ）。
 func clampPct(v float64) int {
 	if math.IsNaN(v) || v <= 0 {
@@ -342,7 +378,9 @@ func updateTrayFromSnapshot() {
 	}
 	pct5h := clampPct(snap.FiveHour.Utilization)
 	pct7d := clampPct(snap.SevenDay.Utilization)
-	hIcon := generateTrayIcon(pct5h, pct7d)
+	yellow, red := trayPaceThresholds(snap.SevenDay.ResetsAt, time.Now())
+	band := trayBandFor(snap.SevenDay.Utilization, yellow, red)
+	hIcon := generateTrayIcon(pct5h, band)
 	if hIcon == 0 {
 		return
 	}
@@ -385,20 +423,20 @@ func truncateString(s string, n int) string {
 }
 
 // drawTrayIconImage は 16x16 のトレイアイコン画像を RGBA で組み立てる純関数。
-// アプリアイコン（assets/icon.ico）と共通の「円形 + 中央シンボル」意匠を踏襲し、
-// 7 日使用率を色と外周リングのフィル角度で、5 時間使用率を中央の数字で表現する。
-// 16px という極小サイズの可読性を優先し、リムは 1.2px・中央数字は basicfont 7x13。
-func drawTrayIconImage(pct5h, pct7d int) *image.RGBA {
+// 角丸四角 + 中央数字の構成で、7 日ウィンドウのペース判定を背景色（緑/黄/赤）で、
+// 5 時間使用率を中央の数字で表現する。円形時代より数字の左右余白が広く取れるため
+// 5/6 など紛らわしい数字の判読性を優先した意匠。数字は basicfont 7x13。
+func drawTrayIconImage(pct5h int, band trayBand) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, trayIconSize, trayIconSize))
 
-	// 7d バンドで配色決定。Claude 系の暖色系で統一。
+	// ペース判定バンドで配色決定。Claude 系の暖色系で統一。
 	var diskColor, rimColor, fgColor color.RGBA
-	switch {
-	case pct7d <= 60:
+	switch band {
+	case trayBandGreen:
 		diskColor = color.RGBA{R: 123, G: 176, B: 123, A: 255} // sage green #7BB07B
 		rimColor = color.RGBA{R: 77, G: 128, B: 77, A: 255}
 		fgColor = color.RGBA{R: 20, G: 28, B: 20, A: 255}
-	case pct7d <= 80:
+	case trayBandAmber:
 		diskColor = color.RGBA{R: 232, G: 168, B: 83, A: 255} // amber #E8A853
 		rimColor = color.RGBA{R: 172, G: 116, B: 45, A: 255}
 		fgColor = color.RGBA{R: 40, G: 26, B: 10, A: 255}
@@ -408,19 +446,7 @@ func drawTrayIconImage(pct5h, pct7d int) *image.RGBA {
 		fgColor = color.RGBA{R: 248, G: 238, B: 232, A: 255}
 	}
 
-	cx, cy := float64(trayIconSize)/2, float64(trayIconSize)/2
-	outerR := float64(trayIconSize)/2 - 0.5
-	innerR := outerR - 1.2
-
-	fillTrayDisk(img, cx, cy, outerR, rimColor)
-	fillTrayDisk(img, cx, cy, innerR, diskColor)
-
-	if pct7d > 0 {
-		sweep := float64(pct7d) / 100 * 2 * math.Pi
-		// リム全幅を覆うハイライトアーク。16px ではコントラスト優先のため不透明度 150。
-		overlay := color.RGBA{R: 255, G: 255, B: 255, A: 150}
-		fillTrayRing(img, cx, cy, outerR-1.3, outerR+0.1, -math.Pi/2, sweep, overlay)
-	}
+	drawTraySquareBase(img, diskColor, rimColor)
 
 	val := pct5h
 	if val < 0 {
@@ -482,8 +508,18 @@ func drawTrayCompact100(img *image.RGBA, c color.RGBA) {
 	}
 }
 
-func generateTrayIcon(pct5h, pct7d int) uintptr {
-	return imageToHICON(drawTrayIconImage(pct5h, pct7d))
+// drawTraySquareBase は角丸四角の下地（外枠 + 内側フィル）を描く。
+// 0.5px マージンで 16px をいっぱいに使い、リム約 1.2px は円形時代の意匠を踏襲。
+func drawTraySquareBase(img *image.RGBA, diskColor, rimColor color.RGBA) {
+	const margin = 0.5
+	const rim = 1.2
+	size := float64(trayIconSize)
+	fillTrayRoundedRect(img, margin, margin, size-margin, size-margin, 3.5, rimColor)
+	fillTrayRoundedRect(img, margin+rim, margin+rim, size-margin-rim, size-margin-rim, 3.5-rim, diskColor)
+}
+
+func generateTrayIcon(pct5h int, band trayBand) uintptr {
+	return imageToHICON(drawTrayIconImage(pct5h, band))
 }
 
 // generateErrorTrayIcon は認証エラー・通信エラー用のグレー "?" アイコンを返す。
@@ -496,11 +532,7 @@ func drawTrayIconErrorImage() *image.RGBA {
 	disk := color.RGBA{R: 110, G: 114, B: 126, A: 255}
 	rim := color.RGBA{R: 70, G: 72, B: 82, A: 255}
 	fg := color.RGBA{R: 250, G: 250, B: 255, A: 255}
-	cx, cy := float64(trayIconSize)/2, float64(trayIconSize)/2
-	outerR := float64(trayIconSize)/2 - 0.5
-	innerR := outerR - 1.2
-	fillTrayDisk(img, cx, cy, outerR, rim)
-	fillTrayDisk(img, cx, cy, innerR, disk)
+	drawTraySquareBase(img, disk, rim)
 
 	drawer := &font.Drawer{
 		Dst:  img,
@@ -547,57 +579,24 @@ func imageToHICON(img *image.RGBA) uintptr {
 	return hIcon
 }
 
-// fillTrayDisk: アンチエイリアス付きで円盤を塗る（アルファは既存ピクセルにオーバー合成）。
-func fillTrayDisk(img *image.RGBA, cx, cy, r float64, c color.RGBA) {
-	b := img.Bounds()
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			dx := float64(x) + 0.5 - cx
-			dy := float64(y) + 0.5 - cy
-			d := math.Sqrt(dx*dx + dy*dy)
-			if d <= r-0.5 {
-				blendTray(img, x, y, c, 1)
-				continue
-			}
-			if d < r+0.5 {
-				blendTray(img, x, y, c, r+0.5-d)
-			}
-		}
-	}
-}
-
-// fillTrayRing: 円環の指定角度範囲を塗る。startAngle=-π/2 が 12 時方向。
-func fillTrayRing(img *image.RGBA, cx, cy, innerR, outerR, startAngle, sweep float64, c color.RGBA) {
-	if sweep <= 0 {
+// fillTrayRoundedRect: アンチエイリアス付きで角丸四角を塗る（アルファは既存ピクセルにオーバー合成）。
+// [x0,x1]×[y0,y1] はピクセル座標での外形。角丸の符号付き距離場からピクセル中心の被覆率を近似する。
+func fillTrayRoundedRect(img *image.RGBA, x0, y0, x1, y1, radius float64, c color.RGBA) {
+	if x1 <= x0 || y1 <= y0 {
 		return
 	}
+	radius = min(radius, (x1-x0)/2, (y1-y0)/2)
+	radius = max(radius, 0)
+	cx, cy := (x0+x1)/2, (y0+y1)/2
+	halfW, halfH := (x1-x0)/2-radius, (y1-y0)/2-radius
 	b := img.Bounds()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
-			dx := float64(x) + 0.5 - cx
-			dy := float64(y) + 0.5 - cy
-			d := math.Sqrt(dx*dx + dy*dy)
-			if d > outerR+0.5 || d < innerR-0.5 {
-				continue
-			}
-			a := math.Atan2(dy, dx)
-			for a < startAngle {
-				a += 2 * math.Pi
-			}
-			if a-startAngle > sweep {
-				continue
-			}
-			alpha := 1.0
-			if d > outerR-0.5 {
-				alpha = math.Min(alpha, outerR+0.5-d)
-			}
-			if d < innerR+0.5 {
-				alpha = math.Min(alpha, d-(innerR-0.5))
-			}
-			if alpha <= 0 {
-				continue
-			}
-			blendTray(img, x, y, c, alpha)
+			dx := math.Abs(float64(x)+0.5-cx) - halfW
+			dy := math.Abs(float64(y)+0.5-cy) - halfH
+			qx, qy := max(dx, 0), max(dy, 0)
+			d := math.Sqrt(qx*qx+qy*qy) + min(max(dx, dy), 0) - radius
+			blendTray(img, x, y, c, 0.5-d)
 		}
 	}
 }
