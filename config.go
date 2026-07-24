@@ -23,6 +23,10 @@ type Config struct {
 	NotifyStatus     bool   `json:"notifyStatus"`
 	OverageTipFormat string `json:"overageTipFormat"` // "dollar" | "percent"
 
+	// ResetTimeFormat は5時間枠のリセット時刻表示形式。"datetime"（既定・絶対日時）
+	// | "relative"（残り時間表示）。7日枠には適用しない。
+	ResetTimeFormat string `json:"resetTimeFormat"`
+
 	// TraySplitDays は 7 日ウィンドウ配色のペース基準日数。
 	// 7 = 7日フル（既定、現状動作）、5 = 5日で閾値到達（早期警告）、0 = 分割なし（固定 60/80%しきい値）。
 	TraySplitDays int `json:"traySplitDays"`
@@ -75,6 +79,17 @@ func normalizeTraySplitDays(v int) int {
 	}
 }
 
+// normalizeResetTimeFormat は "datetime"/"relative" 以外の値（旧バージョンの欠損値や
+// 不正値）を既定の "datetime" に丸める。
+func normalizeResetTimeFormat(v string) string {
+	switch v {
+	case "datetime", "relative":
+		return v
+	default:
+		return "datetime"
+	}
+}
+
 var (
 	configMu   sync.Mutex
 	configPath string
@@ -88,6 +103,7 @@ func defaultConfig() Config {
 	c.NotifyOverage = true
 	c.NotifyStatus = true
 	c.OverageTipFormat = "dollar"
+	c.ResetTimeFormat = "datetime"
 	c.UsagePollSeconds = defaultPollSeconds
 	c.StatusPollSeconds = defaultPollSeconds
 	c.TraySplitDays = 7
@@ -113,6 +129,7 @@ func loadConfig() {
 	tmp.UsagePollSeconds = clampPollSeconds(tmp.UsagePollSeconds)
 	tmp.StatusPollSeconds = clampPollSeconds(tmp.StatusPollSeconds)
 	tmp.TraySplitDays = normalizeTraySplitDays(tmp.TraySplitDays)
+	tmp.ResetTimeFormat = normalizeResetTimeFormat(tmp.ResetTimeFormat)
 	config = tmp
 }
 
