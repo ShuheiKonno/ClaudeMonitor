@@ -471,9 +471,15 @@ const htmlTemplate = `<!DOCTYPE html>
       </div>
 
       <div class="group">
+        <div class="group-title">5時間枠のリセット表示</div>
+        <label><input type="radio" name="reset-time-fmt" value="datetime" id="reset-time-fmt-datetime"> 日時表示</label>
+        <label><input type="radio" name="reset-time-fmt" value="relative" id="reset-time-fmt-relative"> 残り時間表示（あと3時間20分）</label>
+      </div>
+
+      <div class="group">
         <div class="group-title">7日使用量アイコンの配色ペース</div>
-        <label><input type="radio" name="tray-split" value="7" id="tray-split-7"> 7日分割（既定・7日かけて満タン）</label>
-        <label><input type="radio" name="tray-split" value="5" id="tray-split-5"> 5日分割（5日で満タン・早めに警告色）</label>
+        <label><input type="radio" name="tray-split" value="7" id="tray-split-7"> 7日按分（N/7日で警告色）</label>
+        <label><input type="radio" name="tray-split" value="5" id="tray-split-5"> 5日按分（N/5日で警告色）</label>
         <label><input type="radio" name="tray-split" value="0" id="tray-split-0"> 分割なし（固定 60% / 80%）</label>
       </div>
 
@@ -529,6 +535,19 @@ function formatResetDateTime(iso) {
   return '↻ ' + mo + '月' + d + '日（' + w + '）' + hh + ':' + mm;
 }
 
+// あと◯時間◯分でリセット、という相対表示。過去時刻・不正日時はガードする。
+function formatResetRelative(iso) {
+  if (!iso) return '';
+  const t = new Date(iso);
+  if (isNaN(t.getTime())) return '';
+  let diffMin = Math.round((t.getTime() - Date.now()) / 60000);
+  if (diffMin <= 0) return '↻ まもなくリセット';
+  const h = Math.floor(diffMin / 60);
+  const m = diffMin % 60;
+  if (h <= 0) return '↻ あと' + m + '分';
+  return '↻ あと' + h + '時間' + m + '分';
+}
+
 function applyWindow(prefix, win) {
   const pctEl = document.getElementById('pct-' + prefix);
   const barEl = document.getElementById('bar-' + prefix);
@@ -547,7 +566,9 @@ function applyWindow(prefix, win) {
   // 0-60% 緑 (default) / 61-80% 黄 (warn) / 81-100% 赤 (crit)
   if (pct >= 81) barEl.classList.add('crit');
   else if (pct >= 61) barEl.classList.add('warn');
-  resetEl.textContent = formatResetDateTime(win.resetsAt);
+  resetEl.textContent = (prefix === '5h' && resetTimeFormat === 'relative')
+    ? formatResetRelative(win.resetsAt)
+    : formatResetDateTime(win.resetsAt);
 }
 
 function formatResetDate(iso) {
@@ -602,6 +623,7 @@ function applyOverage(overage) {
 let lastUpdated = null;
 let lastSnapshot = null;
 let lastStatusSnap = null;
+let resetTimeFormat = 'datetime';
 
 function renderAuthBanner(snap) {
   const banner = document.getElementById('auth-banner');
@@ -806,6 +828,10 @@ async function openSettings() {
   const fmt = s.overageTipFormat || 'dollar';
   document.getElementById('overage-tip-dollar').checked = fmt === 'dollar';
   document.getElementById('overage-tip-percent').checked = fmt === 'percent';
+  const rtf = s.resetTimeFormat === 'relative' ? 'relative' : 'datetime';
+  document.getElementById('reset-time-fmt-datetime').checked = rtf === 'datetime';
+  document.getElementById('reset-time-fmt-relative').checked = rtf === 'relative';
+  resetTimeFormat = rtf;
   const traySplit = s.traySplitDays ?? 7;
   document.getElementById('tray-split-7').checked = traySplit === 7;
   document.getElementById('tray-split-5').checked = traySplit === 5;
@@ -836,6 +862,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     notifyOverage: document.getElementById('notify-overage').checked,
     notifyStatus: document.getElementById('notify-status').checked,
     overageTipFormat: document.querySelector('input[name="overage-tip-fmt"]:checked')?.value || 'dollar',
+    resetTimeFormat: document.querySelector('input[name="reset-time-fmt"]:checked')?.value || 'datetime',
     traySplitDays: parseInt(document.querySelector('input[name="tray-split"]:checked')?.value ?? '7', 10),
     usagePollSeconds: clampPoll(document.getElementById('poll-usage').value),
     statusPollSeconds: clampPoll(document.getElementById('poll-status').value),
@@ -850,6 +877,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     // 戻り値（サーバでクランプ済）を正として障害ポーリングを張り直す。
     applied = await res.json();
   } catch (e) {}
+  resetTimeFormat = applied.resetTimeFormat === 'relative' ? 'relative' : 'datetime';
   startStatusPolling(applied.statusPollSeconds || 300);
   closeSettings();
   fetchUsage();
@@ -892,6 +920,7 @@ async function initStatusPolling() {
   try {
     const s = await (await fetch('/api/settings')).json();
     if (s.statusPollSeconds) sec = s.statusPollSeconds;
+    resetTimeFormat = s.resetTimeFormat === 'relative' ? 'relative' : 'datetime';
   } catch (e) {}
   startStatusPolling(sec);
 }

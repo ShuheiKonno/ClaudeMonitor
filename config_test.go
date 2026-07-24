@@ -24,6 +24,22 @@ func TestClampPollSeconds(t *testing.T) {
 	}
 }
 
+func TestNormalizeResetTimeFormat(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "datetime"},         // 旧config・欠損キー → 既定
+		{"datetime", "datetime"}, // 既定値はそのまま
+		{"relative", "relative"}, // 相対表示
+		{"invalid", "datetime"},  // 不正値 → 既定
+	}
+	for _, c := range cases {
+		if got := normalizeResetTimeFormat(c.in); got != c.want {
+			t.Errorf("normalizeResetTimeFormat(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestPollIntervalsNeverZero は config が 0/範囲外でも間隔が常に正であることを保証する。
 // time.NewTicker / Ticker.Reset は間隔 <= 0 で panic するため、この不変条件が重要。
 func TestPollIntervalsNeverZero(t *testing.T) {

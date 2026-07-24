@@ -31,6 +31,7 @@ type settingsPayload struct {
 	NotifyOverage     bool   `json:"notifyOverage"`
 	NotifyStatus      bool   `json:"notifyStatus"`
 	OverageTipFormat  string `json:"overageTipFormat"`
+	ResetTimeFormat   string `json:"resetTimeFormat"`
 	UsagePollSeconds  int    `json:"usagePollSeconds"`
 	StatusPollSeconds int    `json:"statusPollSeconds"`
 	TraySplitDays     int    `json:"traySplitDays"`
@@ -62,6 +63,7 @@ func startServer() (int, error) {
 			NotifyOverage:     cfg.NotifyOverage,
 			NotifyStatus:      cfg.NotifyStatus,
 			OverageTipFormat:  cfg.OverageTipFormat,
+			ResetTimeFormat:   cfg.ResetTimeFormat,
 			UsagePollSeconds:  cfg.UsagePollSeconds,
 			StatusPollSeconds: cfg.StatusPollSeconds,
 			TraySplitDays:     cfg.TraySplitDays,
@@ -78,6 +80,7 @@ func startServer() (int, error) {
 		usageSec := clampPollSeconds(p.UsagePollSeconds)
 		statusSec := clampPollSeconds(p.StatusPollSeconds)
 		splitDays := normalizeTraySplitDays(p.TraySplitDays)
+		resetFmt := normalizeResetTimeFormat(p.ResetTimeFormat)
 		mutateConfig(func(c *Config) {
 			c.Topmost = p.Topmost
 			c.Transparent = p.Transparent
@@ -85,6 +88,7 @@ func startServer() (int, error) {
 			c.NotifyOverage = p.NotifyOverage
 			c.NotifyStatus = p.NotifyStatus
 			c.OverageTipFormat = p.OverageTipFormat
+			c.ResetTimeFormat = resetFmt
 			c.UsagePollSeconds = usageSec
 			c.StatusPollSeconds = statusSec
 			c.TraySplitDays = splitDays
@@ -97,6 +101,7 @@ func startServer() (int, error) {
 		p.UsagePollSeconds = usageSec
 		p.StatusPollSeconds = statusSec
 		p.TraySplitDays = splitDays
+		p.ResetTimeFormat = resetFmt
 		writeJSON(w, p)
 	})
 
