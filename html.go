@@ -831,6 +831,7 @@ async function openSettings() {
   const rtf = s.resetTimeFormat === 'relative' ? 'relative' : 'datetime';
   document.getElementById('reset-time-fmt-datetime').checked = rtf === 'datetime';
   document.getElementById('reset-time-fmt-relative').checked = rtf === 'relative';
+  resetTimeFormat = rtf;
   const traySplit = s.traySplitDays ?? 7;
   document.getElementById('tray-split-7').checked = traySplit === 7;
   document.getElementById('tray-split-5').checked = traySplit === 5;
