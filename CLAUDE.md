@@ -14,7 +14,7 @@ ClaudeMonitor は Claude AI のトークン使用量をリアルタイムで監�
 
 ```bash
 # 本番ビルド（コンソール非表示）
-go build -ldflags "-H windowsgui -X main.AppVersion=v0.9.6" -o ClaudeMonitor.exe .
+go build -ldflags "-H windowsgui -X main.AppVersion=v0.9.7" -o ClaudeMonitor.exe .
 
 # デバッグビルド（コンソール出力あり）
 go build -o ClaudeMonitor-debug.exe .
@@ -29,7 +29,7 @@ go run ./cmd/genicon
 # versioninfo.json のバージョン番号を更新してから実行する
 go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
 goversioninfo -icon assets/icon.ico -o rsrc_windows_amd64.syso
-go build -ldflags "-H windowsgui -X main.AppVersion=v0.9.6" -o ClaudeMonitor.exe .
+go build -ldflags "-H windowsgui -X main.AppVersion=v0.9.7" -o ClaudeMonitor.exe .
 ```
 
 ## 作業フロー（コーディング〜リリース）

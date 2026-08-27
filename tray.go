@@ -41,6 +41,8 @@ var (
 	procDestroyMenu      = user32.NewProc("DestroyMenu")
 	procPostMessageW     = user32.NewProc("PostMessageW")
 
+	procRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
+
 	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
 )
 
@@ -83,10 +85,30 @@ const (
 	trayIconID    = 1
 	trayIconSize  = 16
 	trayClassName = "ClaudeMonitorTray"
+
+	// showInstanceMessageName は二重起動時に既存インスタンスへ「表示せよ」と伝えるための
+	// RegisterWindowMessage 名。新旧どちらのプロセスからも同じ名前で登録して同じ値を得る。
+	showInstanceMessageName = "ClaudeMonitorShowInstance"
+
+	WS_POPUP = 0x80000000
 )
 
-// HWND_MESSAGE = (HWND)-3
-var hwndMessage = ^uintptr(2)
+// msgTaskbarCreated は explorer.exe が通知領域を作り直したときに
+// HWND_BROADCAST で送られてくるメッセージ。受信したらトレイアイコンを登録し直す。
+var msgTaskbarCreated uint32
+
+// msgShowInstance は二重起動時に別プロセスから送られてくる表示要求メッセージ。
+var msgShowInstance uint32
+
+// registerWindowMessage は RegisterWindowMessageW のラッパー。
+func registerWindowMessage(name string) uint32 {
+	ptr, err := syscall.UTF16PtrFromString(name)
+	if err != nil {
+		return 0
+	}
+	r, _, _ := procRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(ptr)))
+	return uint32(r)
+}
 
 type wndClassEx struct {
 	Size       uint32
@@ -152,6 +174,7 @@ type iconInfo struct {
 var (
 	trayMu          sync.Mutex
 	currentIcon     uintptr
+	currentTip      string
 	trayAdded       bool
 	trayHwnd        uintptr
 	wndProcCallback = syscall.NewCallback(trayWndProc)
@@ -196,6 +219,19 @@ func startTray() {
 }
 
 func trayWndProc(hwnd, msg uintptr, wParam, lParam uintptr) uintptr {
+	// RegisterWindowMessage 由来のメッセージ ID は実行時に決まるので switch の前に判定する。
+	switch {
+	case msgTaskbarCreated != 0 && uint32(msg) == msgTaskbarCreated:
+		// explorer.exe の再起動などで通知領域が作り直された。アイコンを再登録する。
+		notifyLog("TaskbarCreated received; re-adding tray icon")
+		readdTrayIcon()
+		return 0
+	case msgShowInstance != 0 && uint32(msg) == msgShowInstance:
+		// 二重起動した新プロセスからの表示要求。トレイアイコンも取りこぼしていれば復旧する。
+		showMainWindow()
+		readdTrayIcon()
+		return 1
+	}
 	switch msg {
 	case WM_TRAY:
 		switch uint32(lParam) {
@@ -236,6 +272,10 @@ func trayWndProc(hwnd, msg uintptr, wParam, lParam uintptr) uintptr {
 }
 
 func createTrayWindow() bool {
+	// TaskbarCreated は HWND_BROADCAST で配信され、メッセージ専用ウィンドウには届かない。
+	// そのため非表示のトップレベルウィンドウとして作る（ツールウィンドウなので alt+tab にも出ない）。
+	msgTaskbarCreated = registerWindowMessage("TaskbarCreated")
+	msgShowInstance = registerWindowMessage(showInstanceMessageName)
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	className, _ := syscall.UTF16PtrFromString(trayClassName)
 	wc := wndClassEx{
@@ -247,12 +287,12 @@ func createTrayWindow() bool {
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 	empty, _ := syscall.UTF16PtrFromString("")
 	hwnd, _, _ := procCreateWindowExW.Call(
-		0,
+		WS_EX_TOOLWINDOW,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(empty)),
-		0,
+		WS_POPUP,
 		0, 0, 0, 0,
-		hwndMessage,
+		0,
 		0,
 		hInstance,
 		0,
@@ -268,7 +308,9 @@ func showMainWindow() {
 	if windowHandle == 0 {
 		return
 	}
-	procShowWindow.Call(windowHandle, SW_SHOW)
+	// トレイスレッドから呼ばれるため、UI スレッドがハングしていても
+	// ここで止まらないよう非同期版を使う（同期 ShowWindow だとトレイ更新まで巻き添えになる）。
+	procShowWindowAsync.Call(windowHandle, SW_SHOW)
 	procSetForegroundWindow.Call(windowHandle)
 }
 
@@ -659,39 +701,76 @@ func fillNotifyIconData(nid *notifyIconData, tip string) {
 	}
 }
 
-func addTrayIcon() {
-	trayMu.Lock()
-	defer trayMu.Unlock()
-	if trayAdded {
-		return
-	}
-	hIcon := generateTrayIcon(0, 0)
-	var nid notifyIconData
-	fillNotifyIconData(&nid, "Claude モニター")
-	nid.UFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE
-	nid.HIcon = hIcon
-	procShellNotifyIcon.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid)))
-	currentIcon = hIcon
-	trayAdded = true
-}
-
-func setTrayIcon(hIcon uintptr, tip string) {
-	trayMu.Lock()
-	defer trayMu.Unlock()
-	if !trayAdded {
-		return
+// applyTrayIconLocked はアイコンとツールチップを通知領域に反映する。
+// NIM_MODIFY が失敗した場合（explorer 再起動や登録取りこぼしでアイコンが消えている場合）は
+// NIM_ADD で登録し直すため、定期更新がそのままウォッチドッグとして機能する。
+// 呼び出し側で trayMu を保持していること。
+func applyTrayIconLocked(hIcon uintptr, tip string) bool {
+	if tip == "" {
+		tip = currentTip
 	}
 	var nid notifyIconData
 	fillNotifyIconData(&nid, tip)
 	nid.UFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE
 	nid.HIcon = hIcon
-	procShellNotifyIcon.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))
+
+	ok := false
+	if trayAdded {
+		r, _, _ := procShellNotifyIcon.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))
+		ok = r != 0
+	}
+	if !ok {
+		r, _, _ := procShellNotifyIcon.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid)))
+		ok = r != 0
+		if ok && trayAdded {
+			notifyLog("tray icon re-added after NIM_MODIFY failure")
+		}
+	}
+	if !ok {
+		// NIM_ADD の失敗はアイコンがまだ登録済みであることを意味する場合がある
+		// （通知領域が消えていないのに再追加を試みたケース）。MODIFY で回復を試みる。
+		r, _, _ := procShellNotifyIcon.Call(NIM_MODIFY, uintptr(unsafe.Pointer(&nid)))
+		ok = r != 0
+	}
+	trayAdded = ok
+	currentTip = tip
 
 	old := currentIcon
 	currentIcon = hIcon
 	if old != 0 && old != hIcon {
 		procDestroyIcon.Call(old)
 	}
+	return ok
+}
+
+func addTrayIcon() {
+	trayMu.Lock()
+	defer trayMu.Unlock()
+	if trayAdded {
+		return
+	}
+	applyTrayIconLocked(generateTrayIcon(0, 0), "Claude モニター")
+}
+
+// readdTrayIcon は通知領域からアイコンが消えた場合に登録をやり直す。
+// TaskbarCreated 受信時と、二重起動時の表示要求受信時に呼ばれる。
+func readdTrayIcon() {
+	trayMu.Lock()
+	trayAdded = false
+	icon := currentIcon
+	if icon == 0 {
+		icon = generateTrayIcon(0, 0)
+	}
+	applyTrayIconLocked(icon, "")
+	trayMu.Unlock()
+	// 直後に最新のスナップショットで描き直す（色・ツールチップを現状に合わせる）
+	updateTrayFromSnapshot()
+}
+
+func setTrayIcon(hIcon uintptr, tip string) {
+	trayMu.Lock()
+	defer trayMu.Unlock()
+	applyTrayIconLocked(hIcon, tip)
 }
 
 // showBalloonNotification はトレイアイコン経由でバルーン (Win10/11 ではトースト) 通知を表示する。
@@ -701,8 +780,16 @@ func showBalloonNotification(title, message string, flag uint32) {
 	trayMu.Lock()
 	defer trayMu.Unlock()
 	if !trayAdded {
-		notifyLog("balloon skip trayAdded=false title=%q", title)
-		return
+		// アイコンが通知領域から消えている場合は登録し直してから通知する
+		icon := currentIcon
+		if icon == 0 {
+			icon = generateTrayIcon(0, 0)
+		}
+		if !applyTrayIconLocked(icon, "") {
+			notifyLog("balloon skip trayAdded=false title=%q", title)
+			return
+		}
+		notifyLog("balloon: tray icon restored before notify title=%q", title)
 	}
 	var nid notifyIconData
 	nid.CbSize = uint32(unsafe.Sizeof(nid))
@@ -741,5 +828,6 @@ func removeTrayIcon() {
 		procDestroyIcon.Call(currentIcon)
 		currentIcon = 0
 	}
+	currentTip = ""
 	trayAdded = false
 }
