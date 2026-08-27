@@ -247,21 +247,6 @@ func persistCurrentWindow() {
 	})
 }
 
-func ensureSingleInstance(windowTitle string) bool {
-	const errorAlreadyExists = 183
-	mutexName, _ := syscall.UTF16PtrFromString("Global\\claude-monitor-single-instance-mutex")
-	_, _, err := procCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
-	if errno, ok := err.(syscall.Errno); ok && errno == errorAlreadyExists {
-		titlePtr, _ := syscall.UTF16PtrFromString(windowTitle)
-		if hwnd, _, _ := procFindWindow.Call(0, uintptr(unsafe.Pointer(titlePtr))); hwnd != 0 {
-			procShowWindow.Call(hwnd, SW_SHOW)
-			procSetForegroundWindow.Call(hwnd)
-		}
-		return false
-	}
-	return true
-}
-
 func main() {
 	runtime.LockOSThread()
 
