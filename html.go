@@ -165,7 +165,26 @@ const htmlTemplate = `<!DOCTYPE html>
     font-size: 9px;
     color: var(--fg-dim);
   }
-  .overview-extra.show { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+  .overview-extra.show { display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+  .overview-extra-top {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+  }
+  .overview-extra-label { width: 34px; flex-shrink: 0; }
+  .overview-extra-detail {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+  }
+  .overview-extra-detail span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .overview-extra strong { color: var(--fg); font-size: 10px; }
   .overview-status { margin-top: auto; }
   .overview-status .status-tile { height: 24px; padding: 0 2px; font-size: 9px; }
@@ -559,7 +578,7 @@ const htmlTemplate = `<!DOCTYPE html>
       <div class="overview-message incident" id="ov-claude-incident"></div>
       <div class="overview-window"><div class="row-top"><span class="row-label" id="ov-claude-label-5h">5時間</span><div class="bar"><div class="bar-fill" id="ov-claude-bar-5h"></div></div><span class="bar-pct" id="ov-claude-pct-5h">—</span></div><div class="bar-reset" id="ov-claude-reset-5h"></div></div>
       <div class="overview-window"><div class="row-top"><span class="row-label" id="ov-claude-label-7d">7日</span><div class="bar"><div class="bar-fill" id="ov-claude-bar-7d"></div></div><span class="bar-pct" id="ov-claude-pct-7d">—</span></div><div class="bar-reset" id="ov-claude-reset-7d"></div></div>
-      <div class="overview-extra" id="ov-claude-extra"><span id="ov-claude-extra-label"></span><strong id="ov-claude-extra-value"></strong></div>
+      <div class="overview-extra" id="ov-claude-extra"><div class="overview-extra-top"><span class="overview-extra-label" id="ov-claude-extra-label"></span><div class="bar" id="ov-claude-extra-bar" style="display:none"><div class="bar-fill" id="ov-claude-extra-bar-fill"></div></div><strong id="ov-claude-extra-value"></strong></div><div class="overview-extra-detail"><span id="ov-claude-extra-detail"></span><span id="ov-claude-extra-reset"></span></div></div>
       <div class="status-row overview-status" id="ov-claude-status"></div>
       <div class="overview-links"><span class="detail-link overview-usage-link" data-provider="claude">使用量 →</span><span class="detail-link overview-status-link" data-provider="claude">Status →</span></div>
       <div class="overview-account"><span id="ov-claude-account"></span><span id="ov-claude-updated">未更新</span></div>
@@ -570,7 +589,7 @@ const htmlTemplate = `<!DOCTYPE html>
       <div class="overview-message incident" id="ov-codex-incident"></div>
       <div class="overview-window"><div class="row-top"><span class="row-label" id="ov-codex-label-5h">5時間</span><div class="bar"><div class="bar-fill" id="ov-codex-bar-5h"></div></div><span class="bar-pct" id="ov-codex-pct-5h">—</span></div><div class="bar-reset" id="ov-codex-reset-5h"></div></div>
       <div class="overview-window"><div class="row-top"><span class="row-label" id="ov-codex-label-7d">7日</span><div class="bar"><div class="bar-fill" id="ov-codex-bar-7d"></div></div><span class="bar-pct" id="ov-codex-pct-7d">—</span></div><div class="bar-reset" id="ov-codex-reset-7d"></div></div>
-      <div class="overview-extra" id="ov-codex-extra"><span id="ov-codex-extra-label"></span><strong id="ov-codex-extra-value"></strong></div>
+      <div class="overview-extra" id="ov-codex-extra"><div class="overview-extra-top"><span class="overview-extra-label" id="ov-codex-extra-label"></span><div class="bar" id="ov-codex-extra-bar" style="display:none"><div class="bar-fill" id="ov-codex-extra-bar-fill"></div></div><strong id="ov-codex-extra-value"></strong></div><div class="overview-extra-detail"><span id="ov-codex-extra-detail"></span><span id="ov-codex-extra-reset"></span></div></div>
       <div class="status-row overview-status" id="ov-codex-status"></div>
       <div class="overview-links"><span class="detail-link overview-usage-link" data-provider="codex">使用量 →</span><span class="detail-link overview-status-link" data-provider="codex">Status →</span></div>
       <div class="overview-account"><span id="ov-codex-account"></span><span id="ov-codex-updated">未更新</span></div>
@@ -854,16 +873,38 @@ function renderOverviewProvider(provider) {
   }
 
   const extra = overviewId(provider, 'extra');
+  const extraLabel = overviewId(provider, 'extra-label');
+  const extraValue = overviewId(provider, 'extra-value');
+  const extraBar = overviewId(provider, 'extra-bar');
+  const extraBarFill = overviewId(provider, 'extra-bar-fill');
+  const extraDetail = overviewId(provider, 'extra-detail');
+  const extraReset = overviewId(provider, 'extra-reset');
   extra.classList.remove('show');
+  extraBar.style.display = 'none';
+  extraBarFill.style.width = '0%';
+  extraBarFill.className = 'bar-fill';
+  extraDetail.textContent = '';
+  extraReset.textContent = '';
   if (typeof snap.creditBalance === 'number') {
-    overviewId(provider, 'extra-label').textContent = 'クレジット残高';
-    overviewId(provider, 'extra-value').textContent = '$' + snap.creditBalance.toFixed(2);
+    extraLabel.textContent = '残高';
+    extraValue.textContent = '$' + snap.creditBalance.toFixed(2);
     extra.classList.add('show');
-  } else if (snap.overage && typeof snap.overage.amountUsed === 'number') {
-    overviewId(provider, 'extra-label').textContent = '追加使用量';
-    overviewId(provider, 'extra-value').textContent = snap.overage.spendingLimit > 0
-      ? '$' + snap.overage.amountUsed.toFixed(2) + ' / $' + snap.overage.spendingLimit.toFixed(2)
-      : '$' + snap.overage.amountUsed.toFixed(2);
+  } else if (snap.overage && typeof snap.overage.amountUsed === 'number' &&
+      !(snap.overage.amountUsed === 0 && snap.overage.spendingLimit == null)) {
+    extraLabel.textContent = '追加';
+    if (snap.overage.spendingLimit != null && snap.overage.spendingLimit > 0) {
+      const pctDisplay = Math.round((snap.overage.amountUsed / snap.overage.spendingLimit) * 100);
+      const pct = Math.max(0, Math.min(100, (snap.overage.amountUsed / snap.overage.spendingLimit) * 100));
+      extraBar.style.display = '';
+      extraBarFill.style.width = pct + '%';
+      extraBarFill.className = 'bar-fill' + (pct >= 81 ? ' crit' : pct >= 61 ? ' warn' : '');
+      extraValue.textContent = pctDisplay + '%';
+      extraDetail.textContent = '$' + snap.overage.amountUsed.toFixed(2) + ' / $' + snap.overage.spendingLimit.toFixed(2);
+    } else {
+      extraValue.textContent = '$' + snap.overage.amountUsed.toFixed(2);
+      extraDetail.textContent = '上限: 無制限';
+    }
+    extraReset.textContent = formatResetDate(snap.overage.resetsAt);
     extra.classList.add('show');
   }
 
