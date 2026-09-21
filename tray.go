@@ -251,7 +251,11 @@ func trayWndProc(hwnd, msg uintptr, wParam, lParam uintptr) uintptr {
 				updateTrayFromSnapshot()
 			}()
 		case IDM_REAUTH:
-			showAuthWebView()
+			if snapshotConfig().ActiveProvider == "codex" {
+				showCodexAuthWebView()
+			} else {
+				showAuthWebView()
+			}
 		case IDM_LOGOUT:
 			go logoutUser()
 		case IDM_TEST_NOTIFY:
@@ -340,11 +344,17 @@ func showTrayMenu(hwnd uintptr) {
 	procAppendMenuW.Call(menu, MF_STRING, IDM_TEST_NOTIFY, uintptr(unsafe.Pointer(testNotifyPtr)))
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
 	cfg := snapshotConfig()
-	if cfg.ActiveProvider == "claude" && getUsageSnapshot().AuthState == "ok" {
+	snap := getUsageSnapshot()
+	providerLabel := "Claude"
+	if cfg.ActiveProvider == "codex" {
+		snap = getCodexUsageSnapshot()
+		providerLabel = "Codex"
+	}
+	if snap.AuthState == "ok" {
 		logoutPtr, _ := syscall.UTF16PtrFromString("ログアウト")
 		procAppendMenuW.Call(menu, MF_STRING, IDM_LOGOUT, uintptr(unsafe.Pointer(logoutPtr)))
-	} else if cfg.ActiveProvider == "claude" {
-		reauthPtr, _ := syscall.UTF16PtrFromString("Claude にログイン…")
+	} else {
+		reauthPtr, _ := syscall.UTF16PtrFromString(providerLabel + " にログイン…")
 		procAppendMenuW.Call(menu, MF_STRING, IDM_REAUTH, uintptr(unsafe.Pointer(reauthPtr)))
 	}
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
@@ -467,9 +477,6 @@ func trayTooltipForError(snap UsageSnapshot) string {
 	}
 	switch snap.AuthState {
 	case "needs_login":
-		if snap.Provider == "codex" {
-			return "Codex モニター — 未ログイン\ncodex login を実行してください"
-		}
 		return name + " モニター — 未ログイン\n右クリック → ログイン"
 	case "network_error":
 		return name + " モニター — 取得失敗\n" + truncateString(snap.LastError, 80)

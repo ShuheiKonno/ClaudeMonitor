@@ -98,6 +98,7 @@ const htmlTemplate = `<!DOCTYPE html>
     border-color: rgba(139,158,255,0.55);
     background: rgba(139,158,255,0.16);
   }
+  .provider-tab.provider-hidden, .provider-card.provider-hidden { display: none; }
 
   .overview-view {
     flex-direction: row;
@@ -141,7 +142,7 @@ const htmlTemplate = `<!DOCTYPE html>
     text-overflow: ellipsis;
   }
   .overview-message.show { display: block; }
-  .overview-message.auth { color: #fca5a5; background: var(--err-bg); }
+  .overview-message.auth { color: #fca5a5; background: var(--err-bg); cursor: pointer; }
   .overview-message.incident { color: #fcd34d; background: rgba(250,204,21,0.10); }
   .overview-window {
     display: flex;
@@ -590,6 +591,15 @@ const htmlTemplate = `<!DOCTYPE html>
       </div>
 
       <div class="group">
+        <div class="group-title">表示するサービス</div>
+        <div class="row" style="gap:12px">
+          <label><input type="checkbox" id="provider-enable-claude"> Claude</label>
+          <label><input type="checkbox" id="provider-enable-codex"> Codex</label>
+        </div>
+        <div class="poll-note" id="provider-selection-note">1つ以上選択してください。</div>
+      </div>
+
+      <div class="group">
         <div class="group-title">表示レイアウト</div>
         <label><input type="radio" name="layout-mode" value="tabs" id="layout-tabs"> タブで切り替え</label>
         <label><input type="radio" name="layout-mode" value="overview" id="layout-overview"> 1画面に並べて表示</label>
@@ -779,6 +789,8 @@ let allStatusSnapshots = null;
 let activeProvider = 'claude';
 let layoutMode = 'tabs';
 let resetTimeFormat = 'datetime';
+let claudeEnabled = true;
+let codexEnabled = true;
 
 function overviewId(provider, suffix) {
   return document.getElementById('ov-' + provider + '-' + suffix);
@@ -836,7 +848,7 @@ function renderOverviewProvider(provider) {
   const auth = overviewId(provider, 'auth');
   auth.classList.remove('show');
   if (snap.authState && snap.authState !== 'ok') {
-    auth.textContent = snap.authState === 'needs_login' ? '未ログイン' : snap.authState === 'init' ? '取得中…' : '取得失敗';
+    auth.textContent = snap.authState === 'needs_login' ? '未ログイン（クリックでログイン）' : snap.authState === 'init' ? '取得中…' : '取得失敗';
     auth.title = snap.lastError || '';
     auth.classList.add('show');
   }
@@ -870,8 +882,8 @@ function renderOverviewProvider(provider) {
 }
 
 function renderOverview() {
-  renderOverviewProvider('claude');
-  renderOverviewProvider('codex');
+  if (claudeEnabled) renderOverviewProvider('claude');
+  if (codexEnabled) renderOverviewProvider('codex');
 }
 
 function renderAuthBanner(snap) {
@@ -888,12 +900,10 @@ function renderAuthBanner(snap) {
   switch (snap.authState) {
     case 'needs_login':
       titleEl.textContent = '未ログイン';
-	  if (activeProvider === 'codex') {
-	    bodyEl.textContent = 'Codex CLI で codex login を実行してください。';
-	  } else {
-	    bodyEl.textContent = 'Claude にサインインしてください。';
-	    btn.style.display = 'inline-block';
-	  }
+	  bodyEl.textContent = activeProvider === 'codex'
+	    ? 'ChatGPT にサインインしてください。'
+	    : 'Claude にサインインしてください。';
+	  btn.style.display = 'inline-block';
       break;
     case 'network_error':
       titleEl.textContent = '取得失敗';
@@ -907,7 +917,7 @@ function renderAuthBanner(snap) {
 
 document.getElementById('auth-banner-action').addEventListener('click', async () => {
   try {
-    await fetch('/api/relogin', {method: 'POST'});
+    await fetch('/api/relogin?provider=' + activeProvider, {method: 'POST'});
   } catch (e) {}
 });
 
@@ -1036,6 +1046,7 @@ async function fetchStatus() {
 
 async function switchProvider(provider, persist = true) {
 	if (provider !== 'claude' && provider !== 'codex') return;
+	if ((provider === 'claude' && !claudeEnabled) || (provider === 'codex' && !codexEnabled)) return;
 	activeProvider = provider;
 	document.getElementById('provider-claude').classList.toggle('active', provider === 'claude');
 	document.getElementById('provider-codex').classList.toggle('active', provider === 'codex');
@@ -1089,11 +1100,32 @@ document.querySelectorAll('.overview-usage-link').forEach(el => el.addEventListe
 document.querySelectorAll('.overview-status-link').forEach(el => el.addEventListener('click', () => {
   fetch('/api/open-status?provider=' + el.dataset.provider);
 }));
+document.querySelectorAll('.overview-message.auth').forEach(el => el.addEventListener('click', () => {
+  const provider = el.id.includes('codex') ? 'codex' : 'claude';
+  const snap = allUsageSnapshots && allUsageSnapshots[provider];
+  if (snap && snap.authState === 'needs_login') {
+    fetch('/api/relogin?provider=' + provider, {method: 'POST'});
+  }
+}));
 
 // --- 設定パネル ---
 const mainView = document.getElementById('main-view');
 const overviewView = document.getElementById('overview-view');
 const settingsView = document.getElementById('settings-view');
+
+function applyProviderVisibility(s) {
+  claudeEnabled = s.claudeEnabled !== false;
+  codexEnabled = s.codexEnabled !== false;
+  if (!claudeEnabled && !codexEnabled) claudeEnabled = true;
+  document.getElementById('provider-claude').classList.toggle('provider-hidden', !claudeEnabled);
+  document.getElementById('provider-codex').classList.toggle('provider-hidden', !codexEnabled);
+  document.querySelector('.provider-card[data-provider="claude"]').classList.toggle('provider-hidden', !claudeEnabled);
+  document.querySelector('.provider-card[data-provider="codex"]').classList.toggle('provider-hidden', !codexEnabled);
+  document.querySelector('.provider-tabs').style.display = claudeEnabled && codexEnabled ? 'flex' : 'none';
+  if ((activeProvider === 'claude' && !claudeEnabled) || (activeProvider === 'codex' && !codexEnabled)) {
+    activeProvider = claudeEnabled ? 'claude' : 'codex';
+  }
+}
 
 function applyLayoutModeUI(mode) {
   layoutMode = mode === 'overview' ? 'overview' : 'tabs';
@@ -1106,7 +1138,10 @@ function applyLayoutModeUI(mode) {
 async function openSettings() {
   const res = await fetch('/api/settings');
   const s = await res.json();
+	applyProviderVisibility(s);
 	await switchProvider(s.activeProvider || activeProvider, false);
+	document.getElementById('provider-enable-claude').checked = claudeEnabled;
+	document.getElementById('provider-enable-codex').checked = codexEnabled;
 	const lm = s.layoutMode === 'overview' ? 'overview' : 'tabs';
 	document.getElementById('layout-tabs').checked = lm === 'tabs';
 	document.getElementById('layout-overview').checked = lm === 'overview';
@@ -1146,6 +1181,16 @@ function clampPoll(v) {
   return v;
 }
 document.getElementById('btn-save').addEventListener('click', async () => {
+  const enableClaude = document.getElementById('provider-enable-claude').checked;
+  const enableCodex = document.getElementById('provider-enable-codex').checked;
+  const providerNote = document.getElementById('provider-selection-note');
+  if (!enableClaude && !enableCodex) {
+    providerNote.textContent = 'Claude または Codex を1つ以上選択してください。';
+    providerNote.style.color = '#fca5a5';
+    return;
+  }
+  providerNote.textContent = '1つ以上選択してください。';
+  providerNote.style.color = '';
   const payload = {
     topmost: document.getElementById('topmost').checked,
     transparent: document.getElementById('transparent').checked,
@@ -1153,6 +1198,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     notifyOverage: document.getElementById('notify-overage').checked,
     notifyStatus: document.getElementById('notify-status').checked,
 	layoutMode: document.querySelector('input[name="layout-mode"]:checked')?.value || 'tabs',
+    claudeEnabled: enableClaude,
+    codexEnabled: enableCodex,
     overageTipFormat: document.querySelector('input[name="overage-tip-fmt"]:checked')?.value || 'dollar',
     resetTimeFormat: document.querySelector('input[name="reset-time-fmt"]:checked')?.value || 'datetime',
     traySplitDays: parseInt(document.querySelector('input[name="tray-split"]:checked')?.value ?? '7', 10),
@@ -1170,6 +1217,8 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     applied = await res.json();
   } catch (e) {}
   resetTimeFormat = applied.resetTimeFormat === 'relative' ? 'relative' : 'datetime';
+	applyProviderVisibility(applied);
+	await switchProvider(applied.activeProvider || activeProvider, false);
 	applyLayoutModeUI(applied.layoutMode);
   startStatusPolling(applied.statusPollSeconds || 300);
   closeSettings();
@@ -1214,7 +1263,8 @@ async function initStatusPolling() {
     const s = await (await fetch('/api/settings')).json();
     if (s.statusPollSeconds) sec = s.statusPollSeconds;
     resetTimeFormat = s.resetTimeFormat === 'relative' ? 'relative' : 'datetime';
-	await switchProvider(s.activeProvider || 'claude', false);
+	applyProviderVisibility(s);
+	await switchProvider(s.activeProvider || activeProvider, false);
 	applyLayoutModeUI(s.layoutMode);
   } catch (e) {}
   startStatusPolling(sec);

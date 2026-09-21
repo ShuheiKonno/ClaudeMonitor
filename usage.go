@@ -81,6 +81,13 @@ func applyUsagePollInterval(sec int) {
 				"window.__setUsageInterval && window.__setUsageInterval(%d)", ms))
 		})
 	}
+	if codexAuthWebViewInst != nil {
+		ms := sec * 1000
+		uiDispatch(func() {
+			codexAuthWebViewInst.Eval(fmt.Sprintf(
+				"window.__setCodexUsageInterval && window.__setCodexUsageInterval(%d)", ms))
+		})
+	}
 }
 
 // refreshUsage は補助 WebView の JS に取得をリクエストし、Bind コールバック完了まで待つ。
@@ -90,7 +97,7 @@ func refreshUsage() {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 
-	if authWebViewInst == nil {
+	if !snapshotConfig().ClaudeEnabled || authWebViewInst == nil {
 		return
 	}
 
@@ -158,7 +165,6 @@ func startCollector() {
 	codexUsageMu.Unlock()
 
 	go func() {
-		refreshCodexUsage()
 		ticker := time.NewTicker(usagePollInterval())
 		defer ticker.Stop()
 		for {
@@ -173,12 +179,18 @@ func startCollector() {
 	}()
 }
 
-// refreshAllUsage は Claude WebView と Codex HTTP の取得を並行実行する。
+// refreshAllUsage は有効なプロバイダーの認証 WebView 取得を並行実行する。
 func refreshAllUsage() {
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); refreshUsage() }()
-	go func() { defer wg.Done(); refreshCodexUsage() }()
+	cfg := snapshotConfig()
+	if cfg.ClaudeEnabled {
+		wg.Add(1)
+		go func() { defer wg.Done(); refreshUsage() }()
+	}
+	if cfg.CodexEnabled {
+		wg.Add(1)
+		go func() { defer wg.Done(); refreshCodexUsage() }()
+	}
 	wg.Wait()
 }
 

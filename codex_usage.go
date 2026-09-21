@@ -3,34 +3,18 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-const codexUsageURL = "https://chatgpt.com/backend-api/wham/usage"
-
 var (
 	codexUsageMu     sync.RWMutex
 	cachedCodexUsage UsageSnapshot
-	codexRefreshMu   sync.Mutex
-	codexHTTPClient  = &http.Client{Timeout: 12 * time.Second}
 )
-
-type codexAuthFile struct {
-	Tokens struct {
-		IDToken     string `json:"id_token"`
-		AccessToken string `json:"access_token"`
-		AccountID   string `json:"account_id"`
-	} `json:"tokens"`
-}
 
 type codexUsageResponse struct {
 	PlanType  string `json:"plan_type"`
@@ -51,81 +35,6 @@ type codexRateWindow struct {
 	ResetAt            int64   `json:"reset_at"`
 }
 
-func codexAuthPath() (string, error) {
-	if root := strings.TrimSpace(os.Getenv("CODEX_HOME")); root != "" {
-		return filepath.Join(root, "auth.json"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".codex", "auth.json"), nil
-}
-
-func readCodexAuth() (codexAuthFile, error) {
-	var auth codexAuthFile
-	path, err := codexAuthPath()
-	if err != nil {
-		return auth, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return auth, fmt.Errorf("Codex CLI のログイン情報がありません")
-		}
-		return auth, err
-	}
-	if err := json.Unmarshal(data, &auth); err != nil {
-		return auth, fmt.Errorf("auth.json の解析に失敗: %w", err)
-	}
-	if auth.Tokens.AccessToken == "" {
-		return auth, fmt.Errorf("Codex CLI のアクセストークンがありません")
-	}
-	return auth, nil
-}
-
-func refreshCodexUsage() {
-	codexRefreshMu.Lock()
-	defer codexRefreshMu.Unlock()
-	auth, err := readCodexAuth()
-	if err != nil {
-		updateCodexUsageError("needs_login", err.Error())
-		return
-	}
-	req, err := http.NewRequest(http.MethodGet, codexUsageURL, nil)
-	if err != nil {
-		updateCodexUsageError("network_error", err.Error())
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+auth.Tokens.AccessToken)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "ClaudeCodexMonitor/"+AppVersion)
-	if auth.Tokens.AccountID != "" {
-		req.Header.Set("ChatGPT-Account-Id", auth.Tokens.AccountID)
-	}
-	resp, err := codexHTTPClient.Do(req)
-	if err != nil {
-		updateCodexUsageError("network_error", err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		updateCodexUsageError("needs_login", "Codex CLI の認証期限が切れています。codex login を実行してください")
-		return
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		updateCodexUsageError("network_error", fmt.Sprintf("usage fetch failed: status=%d %s", resp.StatusCode, strings.TrimSpace(string(body))))
-		return
-	}
-	var raw codexUsageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		updateCodexUsageError("network_error", "レスポンス解析失敗: "+err.Error())
-		return
-	}
-	applyCodexUsage(raw, auth.Tokens.IDToken)
-}
-
 func updateCodexUsageError(state, msg string) {
 	codexUsageMu.Lock()
 	cachedCodexUsage.AuthState = state
@@ -136,8 +45,12 @@ func updateCodexUsageError(state, msg string) {
 }
 
 func applyCodexUsage(raw codexUsageResponse, idToken string) {
-	five, seven := classifyCodexWindows(raw.RateLimit.PrimaryWindow, raw.RateLimit.SecondaryWindow)
 	email, name := codexIdentity(idToken)
+	applyCodexUsageIdentity(raw, email, name)
+}
+
+func applyCodexUsageIdentity(raw codexUsageResponse, email, name string) {
+	five, seven := classifyCodexWindows(raw.RateLimit.PrimaryWindow, raw.RateLimit.SecondaryWindow)
 	snap := UsageSnapshot{
 		Provider: "codex", FiveHour: five, SevenDay: seven,
 		Email: email, DisplayName: name, SubscriptionType: codexPlanLabel(raw.PlanType),

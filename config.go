@@ -24,6 +24,8 @@ type Config struct {
 	OverageTipFormat string `json:"overageTipFormat"` // "dollar" | "percent"
 	ActiveProvider   string `json:"activeProvider"`   // "claude" | "codex"
 	LayoutMode       string `json:"layoutMode"`       // "tabs" | "overview"
+	ClaudeEnabled    bool   `json:"claudeEnabled"`
+	CodexEnabled     bool   `json:"codexEnabled"`
 
 	// ResetTimeFormat は5時間枠のリセット時刻表示形式。"datetime"（既定・絶対日時）
 	// | "relative"（残り時間表示）。7日枠には適用しない。
@@ -102,6 +104,31 @@ func normalizeLayoutMode(v string) string {
 	return "tabs"
 }
 
+func normalizeProviderSelection(claudeEnabled, codexEnabled bool, active string) (bool, bool, string) {
+	// UI でも最低1つを必須にするが、手編集された設定も安全に復旧する。
+	if !claudeEnabled && !codexEnabled {
+		claudeEnabled = true
+	}
+	if active == "codex" && codexEnabled {
+		return claudeEnabled, codexEnabled, "codex"
+	}
+	if claudeEnabled {
+		return claudeEnabled, codexEnabled, "claude"
+	}
+	return claudeEnabled, codexEnabled, "codex"
+}
+
+func providerEnabled(c Config, provider string) bool {
+	// ゼロ値 Config はテストや初期化前に使われるため、旧動作互換で両方有効とみなす。
+	if !c.ClaudeEnabled && !c.CodexEnabled {
+		return true
+	}
+	if provider == "codex" {
+		return c.CodexEnabled
+	}
+	return c.ClaudeEnabled
+}
+
 var (
 	configMu   sync.Mutex
 	configPath string
@@ -117,6 +144,8 @@ func defaultConfig() Config {
 	c.OverageTipFormat = "dollar"
 	c.ActiveProvider = "claude"
 	c.LayoutMode = "tabs"
+	c.ClaudeEnabled = true
+	c.CodexEnabled = true
 	c.ResetTimeFormat = "datetime"
 	c.UsagePollSeconds = defaultPollSeconds
 	c.StatusPollSeconds = defaultPollSeconds
@@ -144,9 +173,8 @@ func loadConfig() {
 	tmp.StatusPollSeconds = clampPollSeconds(tmp.StatusPollSeconds)
 	tmp.TraySplitDays = normalizeTraySplitDays(tmp.TraySplitDays)
 	tmp.ResetTimeFormat = normalizeResetTimeFormat(tmp.ResetTimeFormat)
-	if tmp.ActiveProvider != "codex" {
-		tmp.ActiveProvider = "claude"
-	}
+	tmp.ClaudeEnabled, tmp.CodexEnabled, tmp.ActiveProvider = normalizeProviderSelection(
+		tmp.ClaudeEnabled, tmp.CodexEnabled, tmp.ActiveProvider)
 	tmp.LayoutMode = normalizeLayoutMode(tmp.LayoutMode)
 	config = tmp
 }

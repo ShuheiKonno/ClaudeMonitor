@@ -37,6 +37,8 @@ type settingsPayload struct {
 	TraySplitDays     int    `json:"traySplitDays"`
 	ActiveProvider    string `json:"activeProvider"`
 	LayoutMode        string `json:"layoutMode"`
+	ClaudeEnabled     bool   `json:"claudeEnabled"`
+	CodexEnabled      bool   `json:"codexEnabled"`
 }
 
 func startServer() (int, error) {
@@ -71,6 +73,8 @@ func startServer() (int, error) {
 			TraySplitDays:     cfg.TraySplitDays,
 			ActiveProvider:    cfg.ActiveProvider,
 			LayoutMode:        cfg.LayoutMode,
+			ClaudeEnabled:     cfg.ClaudeEnabled,
+			CodexEnabled:      cfg.CodexEnabled,
 		})
 	})
 
@@ -86,6 +90,8 @@ func startServer() (int, error) {
 		splitDays := normalizeTraySplitDays(p.TraySplitDays)
 		resetFmt := normalizeResetTimeFormat(p.ResetTimeFormat)
 		layoutMode := normalizeLayoutMode(p.LayoutMode)
+		claudeEnabled, codexEnabled, activeProvider := normalizeProviderSelection(
+			p.ClaudeEnabled, p.CodexEnabled, snapshotConfig().ActiveProvider)
 		mutateConfig(func(c *Config) {
 			c.Topmost = p.Topmost
 			c.Transparent = p.Transparent
@@ -98,11 +104,15 @@ func startServer() (int, error) {
 			c.StatusPollSeconds = statusSec
 			c.TraySplitDays = splitDays
 			c.LayoutMode = layoutMode
+			c.ClaudeEnabled = claudeEnabled
+			c.CodexEnabled = codexEnabled
+			c.ActiveProvider = activeProvider
 		})
 		setTopmost(p.Topmost)
 		setTransparent(p.Transparent)
 		applyUsagePollInterval(usageSec)
 		applyWindowLayout(layoutMode)
+		applyProviderSelection()
 		// 障害監視間隔は statusCacheTTL() が動的に config を読むため Go 側追加処理は不要。
 		// JS 側が戻り値を使って setInterval を張り直す。
 		p.UsagePollSeconds = usageSec
@@ -110,6 +120,9 @@ func startServer() (int, error) {
 		p.TraySplitDays = splitDays
 		p.ResetTimeFormat = resetFmt
 		p.LayoutMode = layoutMode
+		p.ClaudeEnabled = claudeEnabled
+		p.CodexEnabled = codexEnabled
+		p.ActiveProvider = activeProvider
 		writeJSON(w, p)
 	})
 
@@ -131,7 +144,10 @@ func startServer() (int, error) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if p.Provider != "claude" && p.Provider != "codex" {
+		cfg := snapshotConfig()
+		if (p.Provider != "claude" && p.Provider != "codex") ||
+			(p.Provider == "claude" && !cfg.ClaudeEnabled) ||
+			(p.Provider == "codex" && !cfg.CodexEnabled) {
 			http.Error(w, "invalid provider", http.StatusBadRequest)
 			return
 		}
@@ -205,10 +221,14 @@ func startServer() (int, error) {
 		writeJSON(w, map[string]any{"ok": true})
 	})
 
-	// 補助 WebView をオンスクリーンに復帰させ、claude.ai のログインページを表示する。
-	// バナーの「ログイン」ボタン or トレイの「Claude にログイン…」から呼ばれる。
+	// プロバイダー別の補助 WebView をオンスクリーンに復帰させる。
 	mux.HandleFunc("/api/relogin", func(w http.ResponseWriter, r *http.Request) {
-		go showAuthWebView()
+		provider := r.URL.Query().Get("provider")
+		if provider == "codex" {
+			go showCodexAuthWebView()
+		} else {
+			go showAuthWebView()
+		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
 

@@ -110,7 +110,8 @@ func handleCodexUsageNotification(snap UsageSnapshot) {
 	if snap.AuthState != "ok" {
 		return
 	}
-	if !snapshotConfig().NotifyUsage {
+	cfg := snapshotConfig()
+	if !cfg.NotifyUsage || !providerEnabled(cfg, "codex") {
 		return
 	}
 	notifyMu.Lock()
@@ -165,7 +166,7 @@ func handleUsageNotification(snap UsageSnapshot) {
 		return
 	}
 	cfg := snapshotConfig()
-	if !cfg.NotifyUsage {
+	if !cfg.NotifyUsage || !providerEnabled(cfg, "claude") {
 		notifyLog("usage skip cfg.NotifyUsage=false")
 		return
 	}
@@ -234,7 +235,7 @@ func handleOverageNotification(snap UsageSnapshot) {
 		return
 	}
 	cfg := snapshotConfig()
-	if !cfg.NotifyOverage {
+	if !cfg.NotifyOverage || !providerEnabled(cfg, "claude") {
 		return
 	}
 
@@ -297,7 +298,7 @@ func handleOverageNotification(snap UsageSnapshot) {
 // 起動直後の最初のスナップショットは通知抑制し、既存インシデントを基準として保持する。
 func handleStatusNotification(snap StatusSnapshot) {
 	cfg := snapshotConfig()
-	if !cfg.NotifyStatus {
+	if !cfg.NotifyStatus || !providerEnabled(cfg, "claude") {
 		return
 	}
 
@@ -340,7 +341,8 @@ func showStatusIncidentBalloon(inc IncidentSummary) {
 }
 
 func handleCodexStatusNotification(snap StatusSnapshot) {
-	if !snapshotConfig().NotifyStatus {
+	cfg := snapshotConfig()
+	if !cfg.NotifyStatus || !providerEnabled(cfg, "codex") {
 		return
 	}
 	notifyMu.Lock()

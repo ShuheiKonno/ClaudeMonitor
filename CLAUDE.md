@@ -14,7 +14,7 @@ ClaudeMonitor は Claude AI と OpenAI Codex の使用量を1アプリでリア�
 
 ```bash
 # 本番ビルド（コンソール非表示）
-go build -ldflags "-H windowsgui -X main.AppVersion=v0.9.7" -o ClaudeMonitor.exe .
+go build -ldflags "-H windowsgui -X main.AppVersion=v1.0.0" -o ClaudeMonitor.exe .
 
 # デバッグビルド（コンソール出力あり）
 go build -o ClaudeMonitor-debug.exe .
@@ -29,7 +29,7 @@ go run ./cmd/genicon
 # versioninfo.json のバージョン番号を更新してから実行する
 go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
 goversioninfo -icon assets/icon.ico -o rsrc_windows_amd64.syso
-go build -ldflags "-H windowsgui -X main.AppVersion=v0.9.7" -o ClaudeMonitor.exe .
+go build -ldflags "-H windowsgui -X main.AppVersion=v1.0.0" -o ClaudeMonitor.exe .
 ```
 
 ## 作業フロー（コーディング〜リリース）
@@ -59,7 +59,7 @@ go build -ldflags "-H windowsgui -X main.AppVersion=v0.9.7" -o ClaudeMonitor.exe
 
 1. **メインUI WebView** — `http://127.0.0.1:{random_port}/` を表示するフレームレスウィジェット。タブ表示は230×320px、1画面表示は460×320px
 2. **認証WebView** — オフスクリーン（-32000,-32000）に配置。claude.ai のセッションクッキーを保持し、JS注入で内部APIを呼び出す
-3. **Codex HTTPクライアント** — `~/.codex/auth.json` を読み取り専用で参照し、ChatGPT の usage API と OpenAI Status APIを取得する
+3. **Codex認証WebView** — 専用WebView2でChatGPTへログインし、保持したCookieで usage API を取得する。Codex CLIには依存しない
 
 ```
 認証WebView (claude.ai cookies)
@@ -99,7 +99,8 @@ Go バックグラウンド (usage.go)
 | `notify.go` | 使用量閾値通知（5h: 60%/80%）と status.claude.com インシデント通知 |
 | `status.go` | status.claude.com/api/v2/summary.json をキャッシュ付きでポーリング（間隔は設定可能、既定5分） |
 | `usage.go` | 使用量スナップショット管理、バックグラウンドコレクター（間隔は設定可能、既定5分） |
-| `codex_usage.go` | Codex CLI認証の読み取り、Codex使用量・プラン・クレジット残高の取得 |
+| `codex_auth_webview.go` | ChatGPTログイン用WebView2、Cookie認証、Codex使用量取得 |
+| `codex_usage.go` | Codex使用量・プラン・クレジット残高の変換とキャッシュ |
 | `codex_status.go` | OpenAI Status の Codex Web / Desktop / CLI 監視 |
 | `html.go` | ウィジェットUIのHTML/CSS/JS（バイナリに埋め込み） |
 | `cmd/genicon/` | `assets/icon.ico` の生成ユーティリティ |
@@ -134,7 +135,7 @@ UI変更・バナー追加時は必ず以下の組み合わせでレイアウト
 
 コンテンツ使用可能高さ: 320 − タイトルバー27 − padding12 = **281px**
 
-1画面表示ではClaude/Codexを左右2列にし、各列に短期・長期使用率、追加枠、Status、アカウント、更新時刻を収める。設定保存時に即時リサイズし、モニターの作業領域内へ位置を補正すること。
+1画面表示では有効なClaude/Codexを並べ、各列に短期・長期使用率、追加枠、Status、アカウント、更新時刻を収める。表示サービスは最低1つを必須とする。設定保存時に即時リサイズし、モニターの作業領域内へ位置を補正すること。
 
 | シナリオ | auth-banner | status-banner | overage行 | 期待結果 |
 |---------|:-----------:|:-------------:|:--------:|---------|

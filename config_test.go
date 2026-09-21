@@ -63,6 +63,43 @@ func TestWindowSizeForLayout(t *testing.T) {
 	}
 }
 
+func TestNormalizeProviderSelection(t *testing.T) {
+	claude, codex, active := normalizeProviderSelection(false, false, "codex")
+	if !claude || codex || active != "claude" {
+		t.Fatalf("empty selection = (%v,%v,%q), want Claude only", claude, codex, active)
+	}
+	claude, codex, active = normalizeProviderSelection(false, true, "claude")
+	if claude || !codex || active != "codex" {
+		t.Fatalf("Codex only = (%v,%v,%q)", claude, codex, active)
+	}
+	claude, codex, active = normalizeProviderSelection(true, true, "codex")
+	if !claude || !codex || active != "codex" {
+		t.Fatalf("both = (%v,%v,%q)", claude, codex, active)
+	}
+}
+
+func TestWindowSizeForConfig(t *testing.T) {
+	c := defaultConfig()
+	c.LayoutMode = "overview"
+	if w, h := windowSizeForConfig(c); w != overviewWindowWidth || h != windowHeight {
+		t.Fatalf("both providers overview size = %dx%d", w, h)
+	}
+	c.CodexEnabled = false
+	if w, h := windowSizeForConfig(c); w != tabWindowWidth || h != windowHeight {
+		t.Fatalf("single provider overview size = %dx%d", w, h)
+	}
+}
+
+func TestRightAnchoredX(t *testing.T) {
+	const rightEdge int32 = 1920
+	if got := rightAnchoredX(rightEdge, 595); got != 1325 {
+		t.Fatalf("overview x = %d, want 1325", got)
+	}
+	if got := rightAnchoredX(rightEdge, 308); got != 1612 {
+		t.Fatalf("tabs x = %d, want 1612", got)
+	}
+}
+
 // TestPollIntervalsNeverZero は config が 0/範囲外でも間隔が常に正であることを保証する。
 // time.NewTicker / Ticker.Reset は間隔 <= 0 で panic するため、この不変条件が重要。
 func TestPollIntervalsNeverZero(t *testing.T) {

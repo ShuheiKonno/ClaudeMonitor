@@ -69,6 +69,17 @@ func windowSizeForLayout(layout string) (int, int) {
 	return tabWindowWidth, windowHeight
 }
 
+func windowSizeForConfig(c Config) (int, int) {
+	if normalizeLayoutMode(c.LayoutMode) == "overview" && c.ClaudeEnabled && c.CodexEnabled {
+		return overviewWindowWidth, windowHeight
+	}
+	return tabWindowWidth, windowHeight
+}
+
+func rightAnchoredX(rightEdge, width int32) int32 {
+	return rightEdge - width
+}
+
 type POINT struct {
 	X, Y int32
 }
@@ -172,7 +183,7 @@ func restoreWindowGeometry() bool {
 	physX := int32(math.Round(float64(c.Window.X) * scale))
 	physY := int32(math.Round(float64(c.Window.Y) * scale))
 	// フレームレスでリサイズ不可のため W/H はレイアウト設定を正とする（古い保存値を無視）
-	logicalW, logicalH := windowSizeForLayout(c.LayoutMode)
+	logicalW, logicalH := windowSizeForConfig(c)
 	physW := int32(math.Round(float64(logicalW) * scale))
 	physH := int32(math.Round(float64(logicalH) * scale))
 
@@ -206,11 +217,18 @@ func restoreWindowGeometry() bool {
 
 // applyWindowLayout は表示方式に合わせてウィンドウ幅を切り替え、現在のモニター内へ収める。
 func applyWindowLayout(layout string) {
-	width, height := windowSizeForLayout(layout)
+	c := snapshotConfig()
+	c.LayoutMode = layout
+	width, height := windowSizeForConfig(c)
 	uiDispatch(func() {
 		if mainWebViewInst == nil {
 			return
 		}
+		var before RECT
+		hadWindowRect := windowHandle != 0 && func() bool {
+			ok, _, _ := procGetWindowRect.Call(windowHandle, uintptr(unsafe.Pointer(&before)))
+			return ok != 0
+		}()
 		mainWebViewInst.SetSize(width, height, webview2.HintFixed)
 		if windowHandle == 0 {
 			return
@@ -228,6 +246,11 @@ func applyWindowLayout(layout string) {
 		}
 		w, h := rect.Right-rect.Left, rect.Bottom-rect.Top
 		x, y := rect.Left, rect.Top
+		// 幅を変えても右端を固定し、画面右側に置いたウィジェットが左へ
+		// ずれたように見えないようにする。
+		if hadWindowRect {
+			x = rightAnchoredX(before.Right, w)
+		}
 		if x+w > mi.RcWork.Right {
 			x = mi.RcWork.Right - w
 		}
@@ -323,12 +346,15 @@ func main() {
 	appRoot := filepath.Join(localAppData, "ClaudeMonitor")
 	dataPath := filepath.Join(appRoot, "WebView2")
 	authDataPath := filepath.Join(appRoot, "AuthWebView2")
+	codexAuthDataPath := filepath.Join(appRoot, "CodexAuthWebView2")
 
 	// ログアウト再起動時は認証データを削除してから初期化する。
 	// 旧プロセスのWebView2が解放したファイルをここで安全に削除可能。
 	if isRestart {
 		for i := 0; i < 10; i++ {
-			if err := os.RemoveAll(authDataPath); err == nil {
+			claudeErr := os.RemoveAll(authDataPath)
+			codexErr := os.RemoveAll(codexAuthDataPath)
+			if claudeErr == nil && codexErr == nil {
 				break
 			}
 			time.Sleep(200 * time.Millisecond)
@@ -337,13 +363,14 @@ func main() {
 
 	_ = os.MkdirAll(dataPath, 0755)
 	_ = os.MkdirAll(authDataPath, 0755)
+	_ = os.MkdirAll(codexAuthDataPath, 0755)
 
 	configPath = filepath.Join(appRoot, "config.json")
 	notifyLogPath = filepath.Join(appRoot, "notify.log")
 	debugLogPath = filepath.Join(appRoot, "debug.log")
 	loadConfig()
 	loadNotifyState()
-	initialWidth, initialHeight := windowSizeForLayout(snapshotConfig().LayoutMode)
+	initialWidth, initialHeight := windowSizeForConfig(snapshotConfig())
 
 	startCollector()
 	port, err := startServer()
@@ -377,9 +404,13 @@ func main() {
 	// 主 UI WebView と同スレッド (LockOSThread 済み) で動き、メッセージは
 	// w.Run() の単一メッセージループから両ウィンドウへディスパッチされる。
 	startAuthWebView(authDataPath)
+	startCodexAuthWebView(codexAuthDataPath)
 	defer func() {
 		if authWebViewInst != nil {
 			authWebViewInst.Destroy()
+		}
+		if codexAuthWebViewInst != nil {
+			codexAuthWebViewInst.Destroy()
 		}
 	}()
 
