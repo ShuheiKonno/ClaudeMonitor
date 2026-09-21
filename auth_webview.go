@@ -216,7 +216,11 @@ func startAuthWebView(dataPath string) {
 	}
 
 	aw.Init(authFetcherScript)
-	aw.Navigate("https://claude.ai/settings/usage")
+	if snapshotConfig().ClaudeEnabled {
+		aw.Navigate("https://claude.ai/settings/usage")
+	} else {
+		aw.Navigate("about:blank")
+	}
 }
 
 // authFetcherScript は claude.ai のページコンテキストで動く取得ループ。
@@ -224,6 +228,7 @@ func startAuthWebView(dataPath string) {
 const authFetcherScript = `
 (function() {
   async function fetchClaudeUsage() {
+    if (location.hostname !== 'claude.ai') return;
     try {
       const orgMatch = document.cookie.match(/lastActiveOrg=([^;]+)/);
       if (!orgMatch) {
@@ -396,9 +401,12 @@ func applyUsagePayload(p rawClaudeUsagePayload) {
 		Email:            p.Email,
 		DisplayName:      p.DisplayName,
 		SubscriptionType: deriveSubscriptionType(p.Capabilities, p.RateLimitTier),
+		Provider:         "claude",
 		AuthState:        "ok",
 		UpdatedAt:        time.Now(),
 	}
+	snap.FiveHour.Label = "5時間"
+	snap.SevenDay.Label = "7日"
 	usageMu.Lock()
 	cachedUsage = snap
 	usageMu.Unlock()

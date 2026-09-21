@@ -35,6 +35,10 @@ type settingsPayload struct {
 	UsagePollSeconds  int    `json:"usagePollSeconds"`
 	StatusPollSeconds int    `json:"statusPollSeconds"`
 	TraySplitDays     int    `json:"traySplitDays"`
+	ActiveProvider    string `json:"activeProvider"`
+	LayoutMode        string `json:"layoutMode"`
+	ClaudeEnabled     bool   `json:"claudeEnabled"`
+	CodexEnabled      bool   `json:"codexEnabled"`
 }
 
 func startServer() (int, error) {
@@ -51,7 +55,7 @@ func startServer() (int, error) {
 	})
 
 	mux.HandleFunc("/api/usage", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, getUsageSnapshot())
+		writeJSON(w, getAllUsageSnapshots())
 	})
 
 	mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +71,10 @@ func startServer() (int, error) {
 			UsagePollSeconds:  cfg.UsagePollSeconds,
 			StatusPollSeconds: cfg.StatusPollSeconds,
 			TraySplitDays:     cfg.TraySplitDays,
+			ActiveProvider:    cfg.ActiveProvider,
+			LayoutMode:        cfg.LayoutMode,
+			ClaudeEnabled:     cfg.ClaudeEnabled,
+			CodexEnabled:      cfg.CodexEnabled,
 		})
 	})
 
@@ -81,6 +89,9 @@ func startServer() (int, error) {
 		statusSec := clampPollSeconds(p.StatusPollSeconds)
 		splitDays := normalizeTraySplitDays(p.TraySplitDays)
 		resetFmt := normalizeResetTimeFormat(p.ResetTimeFormat)
+		layoutMode := normalizeLayoutMode(p.LayoutMode)
+		claudeEnabled, codexEnabled, activeProvider := normalizeProviderSelection(
+			p.ClaudeEnabled, p.CodexEnabled, snapshotConfig().ActiveProvider)
 		mutateConfig(func(c *Config) {
 			c.Topmost = p.Topmost
 			c.Transparent = p.Transparent
@@ -92,16 +103,26 @@ func startServer() (int, error) {
 			c.UsagePollSeconds = usageSec
 			c.StatusPollSeconds = statusSec
 			c.TraySplitDays = splitDays
+			c.LayoutMode = layoutMode
+			c.ClaudeEnabled = claudeEnabled
+			c.CodexEnabled = codexEnabled
+			c.ActiveProvider = activeProvider
 		})
 		setTopmost(p.Topmost)
 		setTransparent(p.Transparent)
 		applyUsagePollInterval(usageSec)
+		applyWindowLayout(layoutMode)
+		applyProviderSelection()
 		// 障害監視間隔は statusCacheTTL() が動的に config を読むため Go 側追加処理は不要。
 		// JS 側が戻り値を使って setInterval を張り直す。
 		p.UsagePollSeconds = usageSec
 		p.StatusPollSeconds = statusSec
 		p.TraySplitDays = splitDays
 		p.ResetTimeFormat = resetFmt
+		p.LayoutMode = layoutMode
+		p.ClaudeEnabled = claudeEnabled
+		p.CodexEnabled = codexEnabled
+		p.ActiveProvider = activeProvider
 		writeJSON(w, p)
 	})
 
@@ -109,10 +130,30 @@ func startServer() (int, error) {
 		// 同期でフェッチを実行し、完了後の最新 snapshot を返す。
 		// 「更新」ボタンを押した直後に古い値を返さないために重要。
 		// refreshMu により並行呼び出しは直列化（重複フェッチ防止）。
-		refreshUsage()
+		refreshAllUsage()
 		// ステータスキャッシュも失効させ、次の /api/status で再フェッチさせる。
 		invalidateStatusCache()
-		writeJSON(w, getUsageSnapshot())
+		writeJSON(w, getAllUsageSnapshots())
+	})
+
+	mux.HandleFunc("/api/provider", func(w http.ResponseWriter, r *http.Request) {
+		var p struct {
+			Provider string `json:"provider"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		cfg := snapshotConfig()
+		if (p.Provider != "claude" && p.Provider != "codex") ||
+			(p.Provider == "claude" && !cfg.ClaudeEnabled) ||
+			(p.Provider == "codex" && !cfg.CodexEnabled) {
+			http.Error(w, "invalid provider", http.StatusBadRequest)
+			return
+		}
+		mutateConfig(func(c *Config) { c.ActiveProvider = p.Provider })
+		updateTrayFromSnapshot()
+		writeJSON(w, map[string]any{"ok": true, "provider": p.Provider})
 	})
 
 	mux.HandleFunc("/api/close", func(w http.ResponseWriter, r *http.Request) {
@@ -161,24 +202,38 @@ func startServer() (int, error) {
 	})
 
 	mux.HandleFunc("/api/open-usage", func(w http.ResponseWriter, r *http.Request) {
-		go openExternalURL("https://claude.ai/settings/usage")
+		provider := r.URL.Query().Get("provider")
+		if provider == "codex" {
+			go openExternalURL("https://chatgpt.com/codex/settings/usage")
+		} else {
+			go openExternalURL("https://claude.ai/settings/usage")
+		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
 
 	mux.HandleFunc("/api/open-status", func(w http.ResponseWriter, r *http.Request) {
-		go openExternalURL("https://status.claude.com/")
+		provider := r.URL.Query().Get("provider")
+		if provider == "codex" {
+			go openExternalURL("https://status.openai.com/")
+		} else {
+			go openExternalURL("https://status.claude.com/")
+		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
 
-	// 補助 WebView をオンスクリーンに復帰させ、claude.ai のログインページを表示する。
-	// バナーの「ログイン」ボタン or トレイの「Claude にログイン…」から呼ばれる。
+	// プロバイダー別の補助 WebView をオンスクリーンに復帰させる。
 	mux.HandleFunc("/api/relogin", func(w http.ResponseWriter, r *http.Request) {
-		go showAuthWebView()
+		provider := r.URL.Query().Get("provider")
+		if provider == "codex" {
+			go showCodexAuthWebView()
+		} else {
+			go showAuthWebView()
+		}
 		writeJSON(w, map[string]any{"ok": true})
 	})
 
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, getStatusSnapshot())
+		writeJSON(w, getAllStatusSnapshots())
 	})
 
 	srv := &http.Server{Handler: mux}

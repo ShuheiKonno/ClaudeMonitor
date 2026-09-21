@@ -41,16 +41,21 @@ var (
 
 	// 5h 使用率の通知済みフラグ。FiveHour.ResetsAt が 5h+ 飛ぶか pct=0 でリセット。
 	// アプリ再起動を跨いで重複通知を防ぐため、起動時に config から復元される。
-	notify5hResetsAt  time.Time
-	notified5h60      bool
-	notified5h80      bool
-	overageResetsAt   time.Time
-	notifiedOverage60 bool
-	notifiedOverage80 bool
+	notify5hResetsAt      time.Time
+	notified5h60          bool
+	notified5h80          bool
+	overageResetsAt       time.Time
+	notifiedOverage60     bool
+	notifiedOverage80     bool
+	codexNotify5hResetsAt time.Time
+	codexNotified5h60     bool
+	codexNotified5h80     bool
 
 	// 通知済みインシデント ID。解決した ID は次回フェッチで削除する。
-	notifiedIncidents       = map[string]bool{}
-	notifyStatusInitialized bool
+	notifiedIncidents            = map[string]bool{}
+	notifyStatusInitialized      bool
+	notifiedCodexIncidents       = map[string]bool{}
+	notifyCodexStatusInitialized bool
 
 	// テスト時に差し替えるための関数フック。本番は Win32 バルーン通知を呼ぶ。
 	balloonFn = showBalloonNotification
@@ -68,6 +73,9 @@ func loadNotifyState() {
 	overageResetsAt = cfg.OverageResetsAt
 	notifiedOverage60 = cfg.NotifiedOverage60
 	notifiedOverage80 = cfg.NotifiedOverage80
+	codexNotify5hResetsAt = cfg.CodexNotify5hResetsAt
+	codexNotified5h60 = cfg.CodexNotified5h60
+	codexNotified5h80 = cfg.CodexNotified5h80
 }
 
 // persistNotifyState は notifyMu を保持した呼び出し元から呼ばれる前提。
@@ -79,6 +87,9 @@ func persistNotifyState() {
 	overageAt := overageResetsAt
 	overage60 := notifiedOverage60
 	overage80 := notifiedOverage80
+	codexAt := codexNotify5hResetsAt
+	codex60 := codexNotified5h60
+	codex80 := codexNotified5h80
 	mutateConfig(func(c *Config) {
 		c.Notify5hResetsAt = resetsAt
 		c.Notified5h60 = n60
@@ -86,7 +97,63 @@ func persistNotifyState() {
 		c.OverageResetsAt = overageAt
 		c.NotifiedOverage60 = overage60
 		c.NotifiedOverage80 = overage80
+		c.CodexNotify5hResetsAt = codexAt
+		c.CodexNotified5h60 = codex60
+		c.CodexNotified5h80 = codex80
 	})
+}
+
+// handleCodexUsageNotification は Claude と同じ 60% / 80% しきい値を
+// Codex の短期ウィンドウ（短期枠が無いプランでは長期枠）へ適用する。
+// 状態はプロバイダー別に保持する。
+func handleCodexUsageNotification(snap UsageSnapshot) {
+	if snap.AuthState != "ok" {
+		return
+	}
+	cfg := snapshotConfig()
+	if !cfg.NotifyUsage || !providerEnabled(cfg, "codex") {
+		return
+	}
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	window := snap.FiveHour
+	if window.Label == "" {
+		window = snap.SevenDay
+	}
+	if window.Label == "" {
+		return
+	}
+	var resetsAt time.Time
+	if window.ResetsAt != nil {
+		resetsAt = *window.ResetsAt
+	}
+	pct := window.Utilization
+	stateChanged := false
+	windowReset := resetsAt.Sub(codexNotify5hResetsAt) >= 5*time.Hour || pct == 0
+	if !resetsAt.Equal(codexNotify5hResetsAt) {
+		codexNotify5hResetsAt = resetsAt
+		stateChanged = true
+	}
+	if windowReset && (codexNotified5h60 || codexNotified5h80) {
+		codexNotified5h60 = false
+		codexNotified5h80 = false
+		stateChanged = true
+	}
+	if pct >= notify5h80Threshold && !codexNotified5h80 {
+		codexNotified5h80, codexNotified5h60 = true, true
+		balloonFn("Codex モニター — "+window.Label+"使用量 80%", fmt.Sprintf("現在 %d%% に到達しました。残量に注意してください。", clampPct(pct)), NIIF_WARNING)
+		persistNotifyState()
+		return
+	}
+	if pct >= notify5h60Threshold && !codexNotified5h60 {
+		codexNotified5h60 = true
+		balloonFn("Codex モニター — "+window.Label+"使用量 60%", fmt.Sprintf("現在 %d%% に到達しました。", clampPct(pct)), NIIF_INFO)
+		persistNotifyState()
+		return
+	}
+	if stateChanged {
+		persistNotifyState()
+	}
 }
 
 // handleUsageNotification は使用率スナップショットを受け取り、
@@ -99,7 +166,7 @@ func handleUsageNotification(snap UsageSnapshot) {
 		return
 	}
 	cfg := snapshotConfig()
-	if !cfg.NotifyUsage {
+	if !cfg.NotifyUsage || !providerEnabled(cfg, "claude") {
 		notifyLog("usage skip cfg.NotifyUsage=false")
 		return
 	}
@@ -168,7 +235,7 @@ func handleOverageNotification(snap UsageSnapshot) {
 		return
 	}
 	cfg := snapshotConfig()
-	if !cfg.NotifyOverage {
+	if !cfg.NotifyOverage || !providerEnabled(cfg, "claude") {
 		return
 	}
 
@@ -231,7 +298,7 @@ func handleOverageNotification(snap UsageSnapshot) {
 // 起動直後の最初のスナップショットは通知抑制し、既存インシデントを基準として保持する。
 func handleStatusNotification(snap StatusSnapshot) {
 	cfg := snapshotConfig()
-	if !cfg.NotifyStatus {
+	if !cfg.NotifyStatus || !providerEnabled(cfg, "claude") {
 		return
 	}
 
@@ -270,6 +337,46 @@ func handleStatusNotification(snap StatusSnapshot) {
 }
 
 func showStatusIncidentBalloon(inc IncidentSummary) {
+	showProviderStatusIncidentBalloon("Claude", inc)
+}
+
+func handleCodexStatusNotification(snap StatusSnapshot) {
+	cfg := snapshotConfig()
+	if !cfg.NotifyStatus || !providerEnabled(cfg, "codex") {
+		return
+	}
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	current := make(map[string]bool, len(snap.Incidents))
+	var fresh []IncidentSummary
+	for _, inc := range snap.Incidents {
+		if inc.ID == "" {
+			continue
+		}
+		current[inc.ID] = true
+		if !notifiedCodexIncidents[inc.ID] {
+			fresh = append(fresh, inc)
+		}
+	}
+	for id := range notifiedCodexIncidents {
+		if !current[id] {
+			delete(notifiedCodexIncidents, id)
+		}
+	}
+	if !notifyCodexStatusInitialized {
+		notifyCodexStatusInitialized = true
+		for id := range current {
+			notifiedCodexIncidents[id] = true
+		}
+		return
+	}
+	for _, inc := range fresh {
+		notifiedCodexIncidents[inc.ID] = true
+		showProviderStatusIncidentBalloon("OpenAI", inc)
+	}
+}
+
+func showProviderStatusIncidentBalloon(provider string, inc IncidentSummary) {
 	impactLabel := ""
 	flag := uint32(NIIF_INFO)
 	switch inc.Impact {
@@ -284,9 +391,9 @@ func showStatusIncidentBalloon(inc IncidentSummary) {
 	case "maintenance":
 		impactLabel = "メンテナンス"
 	}
-	title := "Claude Status — 障害検知"
+	title := provider + " Status — 障害検知"
 	if impactLabel != "" {
-		title = "Claude Status — " + impactLabel
+		title = provider + " Status — " + impactLabel
 	}
 	msg := inc.Name
 	if msg == "" {

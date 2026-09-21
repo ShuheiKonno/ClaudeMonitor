@@ -241,4 +241,20 @@ func invalidateStatusCache() {
 	statusMu.Lock()
 	lastStatusFetch = time.Time{}
 	statusMu.Unlock()
+	invalidateCodexStatusCache()
+}
+
+type AllStatusSnapshots struct {
+	Claude StatusSnapshot `json:"claude"`
+	Codex  StatusSnapshot `json:"codex"`
+}
+
+func getAllStatusSnapshots() AllStatusSnapshots {
+	var out AllStatusSnapshots
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); out.Claude = getStatusSnapshot() }()
+	go func() { defer wg.Done(); out.Codex = getCodexStatusSnapshot() }()
+	wg.Wait()
+	return out
 }

@@ -55,11 +55,30 @@ const (
 
 	MONITOR_DEFAULTTONEAREST = 0x00000002
 
-	windowWidth  = 230
-	windowHeight = 295
+	tabWindowWidth      = 230
+	overviewWindowWidth = 460
+	windowHeight        = 320
 )
 
 var windowHandle uintptr
+
+func windowSizeForLayout(layout string) (int, int) {
+	if normalizeLayoutMode(layout) == "overview" {
+		return overviewWindowWidth, windowHeight
+	}
+	return tabWindowWidth, windowHeight
+}
+
+func windowSizeForConfig(c Config) (int, int) {
+	if normalizeLayoutMode(c.LayoutMode) == "overview" && c.ClaudeEnabled && c.CodexEnabled {
+		return overviewWindowWidth, windowHeight
+	}
+	return tabWindowWidth, windowHeight
+}
+
+func rightAnchoredX(rightEdge, width int32) int32 {
+	return rightEdge - width
+}
 
 type POINT struct {
 	X, Y int32
@@ -163,9 +182,10 @@ func restoreWindowGeometry() bool {
 	}
 	physX := int32(math.Round(float64(c.Window.X) * scale))
 	physY := int32(math.Round(float64(c.Window.Y) * scale))
-	// フレームレスでリサイズ不可のため W/H はコード定数を正とする（古い保存値を無視）
-	physW := int32(math.Round(float64(windowWidth) * scale))
-	physH := int32(math.Round(float64(windowHeight) * scale))
+	// フレームレスでリサイズ不可のため W/H はレイアウト設定を正とする（古い保存値を無視）
+	logicalW, logicalH := windowSizeForConfig(c)
+	physW := int32(math.Round(float64(logicalW) * scale))
+	physH := int32(math.Round(float64(logicalH) * scale))
 
 	// 保存された矩形中心のモニターを基準にクランプ（マルチモニター対応）。
 	// MonitorFromPoint は POINT を値渡し（struct as argument）する必要があるため
@@ -193,6 +213,58 @@ func restoreWindowGeometry() bool {
 	}
 	procSetWindowPos.Call(windowHandle, 0, uintptr(physX), uintptr(physY), uintptr(physW), uintptr(physH), SWP_NOZORDER)
 	return true
+}
+
+// applyWindowLayout は表示方式に合わせてウィンドウ幅を切り替え、現在のモニター内へ収める。
+func applyWindowLayout(layout string) {
+	c := snapshotConfig()
+	c.LayoutMode = layout
+	width, height := windowSizeForConfig(c)
+	uiDispatch(func() {
+		if mainWebViewInst == nil {
+			return
+		}
+		var before RECT
+		hadWindowRect := windowHandle != 0 && func() bool {
+			ok, _, _ := procGetWindowRect.Call(windowHandle, uintptr(unsafe.Pointer(&before)))
+			return ok != 0
+		}()
+		mainWebViewInst.SetSize(width, height, webview2.HintFixed)
+		if windowHandle == 0 {
+			return
+		}
+		var rect RECT
+		procGetWindowRect.Call(windowHandle, uintptr(unsafe.Pointer(&rect)))
+		hmon, _, _ := procMonitorFromWindow.Call(windowHandle, MONITOR_DEFAULTTONEAREST)
+		if hmon == 0 {
+			return
+		}
+		var mi MONITORINFO
+		mi.CbSize = uint32(unsafe.Sizeof(mi))
+		if ok, _, _ := procGetMonitorInfoW.Call(hmon, uintptr(unsafe.Pointer(&mi))); ok == 0 {
+			return
+		}
+		w, h := rect.Right-rect.Left, rect.Bottom-rect.Top
+		x, y := rect.Left, rect.Top
+		// 幅を変えても右端を固定し、画面右側に置いたウィジェットが左へ
+		// ずれたように見えないようにする。
+		if hadWindowRect {
+			x = rightAnchoredX(before.Right, w)
+		}
+		if x+w > mi.RcWork.Right {
+			x = mi.RcWork.Right - w
+		}
+		if x < mi.RcWork.Left {
+			x = mi.RcWork.Left
+		}
+		if y+h > mi.RcWork.Bottom {
+			y = mi.RcWork.Bottom - h
+		}
+		if y < mi.RcWork.Top {
+			y = mi.RcWork.Top
+		}
+		procSetWindowPos.Call(windowHandle, 0, uintptr(x), uintptr(y), 0, 0, SWP_NOSIZE|SWP_NOZORDER)
+	})
 }
 
 func moveToBottomRight() {
@@ -262,7 +334,7 @@ func main() {
 		time.Sleep(600 * time.Millisecond)
 	}
 
-	windowTitle := "Claude モニター"
+	windowTitle := "Claude / Codex モニター"
 	if !ensureSingleInstance(windowTitle) {
 		return
 	}
@@ -274,12 +346,15 @@ func main() {
 	appRoot := filepath.Join(localAppData, "ClaudeMonitor")
 	dataPath := filepath.Join(appRoot, "WebView2")
 	authDataPath := filepath.Join(appRoot, "AuthWebView2")
+	codexAuthDataPath := filepath.Join(appRoot, "CodexAuthWebView2")
 
 	// ログアウト再起動時は認証データを削除してから初期化する。
 	// 旧プロセスのWebView2が解放したファイルをここで安全に削除可能。
 	if isRestart {
 		for i := 0; i < 10; i++ {
-			if err := os.RemoveAll(authDataPath); err == nil {
+			claudeErr := os.RemoveAll(authDataPath)
+			codexErr := os.RemoveAll(codexAuthDataPath)
+			if claudeErr == nil && codexErr == nil {
 				break
 			}
 			time.Sleep(200 * time.Millisecond)
@@ -288,12 +363,14 @@ func main() {
 
 	_ = os.MkdirAll(dataPath, 0755)
 	_ = os.MkdirAll(authDataPath, 0755)
+	_ = os.MkdirAll(codexAuthDataPath, 0755)
 
 	configPath = filepath.Join(appRoot, "config.json")
 	notifyLogPath = filepath.Join(appRoot, "notify.log")
 	debugLogPath = filepath.Join(appRoot, "debug.log")
 	loadConfig()
 	loadNotifyState()
+	initialWidth, initialHeight := windowSizeForConfig(snapshotConfig())
 
 	startCollector()
 	port, err := startServer()
@@ -308,8 +385,8 @@ func main() {
 		DataPath:  dataPath,
 		WindowOptions: webview2.WindowOptions{
 			Title:  windowTitle,
-			Width:  windowWidth,
-			Height: windowHeight,
+			Width:  uint(initialWidth),
+			Height: uint(initialHeight),
 			Center: true,
 		},
 	})
@@ -327,9 +404,13 @@ func main() {
 	// 主 UI WebView と同スレッド (LockOSThread 済み) で動き、メッセージは
 	// w.Run() の単一メッセージループから両ウィンドウへディスパッチされる。
 	startAuthWebView(authDataPath)
+	startCodexAuthWebView(codexAuthDataPath)
 	defer func() {
 		if authWebViewInst != nil {
 			authWebViewInst.Destroy()
+		}
+		if codexAuthWebViewInst != nil {
+			codexAuthWebViewInst.Destroy()
 		}
 	}()
 
@@ -361,7 +442,7 @@ func main() {
 		}
 	}()
 
-	w.SetSize(windowWidth, windowHeight, webview2.HintFixed)
+	w.SetSize(initialWidth, initialHeight, webview2.HintFixed)
 	w.Navigate(fmt.Sprintf("http://127.0.0.1:%d", port))
 	w.Run()
 }

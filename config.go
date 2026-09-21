@@ -22,6 +22,10 @@ type Config struct {
 	NotifyOverage    bool   `json:"notifyOverage"`
 	NotifyStatus     bool   `json:"notifyStatus"`
 	OverageTipFormat string `json:"overageTipFormat"` // "dollar" | "percent"
+	ActiveProvider   string `json:"activeProvider"`   // "claude" | "codex"
+	LayoutMode       string `json:"layoutMode"`       // "tabs" | "overview"
+	ClaudeEnabled    bool   `json:"claudeEnabled"`
+	CodexEnabled     bool   `json:"codexEnabled"`
 
 	// ResetTimeFormat は5時間枠のリセット時刻表示形式。"datetime"（既定・絶対日時）
 	// | "relative"（残り時間表示）。7日枠には適用しない。
@@ -38,12 +42,15 @@ type Config struct {
 
 	// 5h 使用量通知の状態を再起動越しに保持する。
 	// 同一ウィンドウ (= 同じ ResetsAt) なら既に通知した閾値を再通知しないため。
-	Notify5hResetsAt  time.Time `json:"notify5hResetsAt,omitempty"`
-	Notified5h60      bool      `json:"notified5h60,omitempty"`
-	Notified5h80      bool      `json:"notified5h80,omitempty"`
-	NotifiedOverage60 bool      `json:"notifiedOverage60,omitempty"`
-	NotifiedOverage80 bool      `json:"notifiedOverage80,omitempty"`
-	OverageResetsAt   time.Time `json:"overageResetsAt,omitempty"`
+	Notify5hResetsAt      time.Time `json:"notify5hResetsAt,omitempty"`
+	Notified5h60          bool      `json:"notified5h60,omitempty"`
+	Notified5h80          bool      `json:"notified5h80,omitempty"`
+	NotifiedOverage60     bool      `json:"notifiedOverage60,omitempty"`
+	NotifiedOverage80     bool      `json:"notifiedOverage80,omitempty"`
+	OverageResetsAt       time.Time `json:"overageResetsAt,omitempty"`
+	CodexNotify5hResetsAt time.Time `json:"codexNotify5hResetsAt,omitempty"`
+	CodexNotified5h60     bool      `json:"codexNotified5h60,omitempty"`
+	CodexNotified5h80     bool      `json:"codexNotified5h80,omitempty"`
 }
 
 // ポーリング間隔の範囲（秒）。
@@ -90,6 +97,38 @@ func normalizeResetTimeFormat(v string) string {
 	}
 }
 
+func normalizeLayoutMode(v string) string {
+	if v == "overview" {
+		return "overview"
+	}
+	return "tabs"
+}
+
+func normalizeProviderSelection(claudeEnabled, codexEnabled bool, active string) (bool, bool, string) {
+	// UI でも最低1つを必須にするが、手編集された設定も安全に復旧する。
+	if !claudeEnabled && !codexEnabled {
+		claudeEnabled = true
+	}
+	if active == "codex" && codexEnabled {
+		return claudeEnabled, codexEnabled, "codex"
+	}
+	if claudeEnabled {
+		return claudeEnabled, codexEnabled, "claude"
+	}
+	return claudeEnabled, codexEnabled, "codex"
+}
+
+func providerEnabled(c Config, provider string) bool {
+	// ゼロ値 Config はテストや初期化前に使われるため、旧動作互換で両方有効とみなす。
+	if !c.ClaudeEnabled && !c.CodexEnabled {
+		return true
+	}
+	if provider == "codex" {
+		return c.CodexEnabled
+	}
+	return c.ClaudeEnabled
+}
+
 var (
 	configMu   sync.Mutex
 	configPath string
@@ -103,6 +142,10 @@ func defaultConfig() Config {
 	c.NotifyOverage = true
 	c.NotifyStatus = true
 	c.OverageTipFormat = "dollar"
+	c.ActiveProvider = "claude"
+	c.LayoutMode = "tabs"
+	c.ClaudeEnabled = true
+	c.CodexEnabled = true
 	c.ResetTimeFormat = "datetime"
 	c.UsagePollSeconds = defaultPollSeconds
 	c.StatusPollSeconds = defaultPollSeconds
@@ -130,6 +173,9 @@ func loadConfig() {
 	tmp.StatusPollSeconds = clampPollSeconds(tmp.StatusPollSeconds)
 	tmp.TraySplitDays = normalizeTraySplitDays(tmp.TraySplitDays)
 	tmp.ResetTimeFormat = normalizeResetTimeFormat(tmp.ResetTimeFormat)
+	tmp.ClaudeEnabled, tmp.CodexEnabled, tmp.ActiveProvider = normalizeProviderSelection(
+		tmp.ClaudeEnabled, tmp.CodexEnabled, tmp.ActiveProvider)
+	tmp.LayoutMode = normalizeLayoutMode(tmp.LayoutMode)
 	config = tmp
 }
 

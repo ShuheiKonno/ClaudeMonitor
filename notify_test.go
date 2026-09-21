@@ -21,9 +21,28 @@ func resetNotifyState() {
 	overageResetsAt = time.Time{}
 	notifiedOverage60 = false
 	notifiedOverage80 = false
+	codexNotify5hResetsAt = time.Time{}
+	codexNotified5h60 = false
+	codexNotified5h80 = false
 	notifiedIncidents = map[string]bool{}
 	notifyStatusInitialized = false
+	notifiedCodexIncidents = map[string]bool{}
+	notifyCodexStatusInitialized = false
 	notifyMu.Unlock()
+}
+
+func TestCodexUsageNotifyFallsBackToWeeklyWindow(t *testing.T) {
+	resetNotifyState()
+	calls := withMockBalloon(t)
+	withConfig(t, func(c *Config) { c.NotifyUsage = true })
+	r := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	handleCodexUsageNotification(UsageSnapshot{
+		Provider: "codex", AuthState: "ok",
+		SevenDay: UsageWindow{Label: "7日", Utilization: 85, ResetsAt: &r},
+	})
+	if len(*calls) != 1 || !strings.Contains((*calls)[0].title, "7日使用量 80%") {
+		t.Fatalf("Codex weekly notification mismatch: %+v", *calls)
+	}
 }
 
 // withMockBalloon は balloonFn を差し替え、呼び出しを記録するフックをテストに渡す。
