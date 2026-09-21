@@ -396,9 +396,12 @@ func applyUsagePayload(p rawClaudeUsagePayload) {
 		Email:            p.Email,
 		DisplayName:      p.DisplayName,
 		SubscriptionType: deriveSubscriptionType(p.Capabilities, p.RateLimitTier),
+		Provider:         "claude",
 		AuthState:        "ok",
 		UpdatedAt:        time.Now(),
 	}
+	snap.FiveHour.Label = "5時間"
+	snap.SevenDay.Label = "7日"
 	usageMu.Lock()
 	cachedUsage = snap
 	usageMu.Unlock()

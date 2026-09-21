@@ -11,6 +11,7 @@ import (
 type UsageWindow struct {
 	Utilization float64    `json:"utilization"`
 	ResetsAt    *time.Time `json:"resetsAt"`
+	Label       string     `json:"label,omitempty"`
 }
 
 // OverageInfo は追加使用量（従量課金）の情報を保持する。
@@ -27,9 +28,11 @@ type UsageSnapshot struct {
 	SevenDay UsageWindow  `json:"sevenDay"`
 	Overage  *OverageInfo `json:"overage,omitempty"`
 
-	Email            string `json:"email"`
-	DisplayName      string `json:"displayName"`
-	SubscriptionType string `json:"subscriptionType"`
+	Email            string   `json:"email"`
+	DisplayName      string   `json:"displayName"`
+	SubscriptionType string   `json:"subscriptionType"`
+	Provider         string   `json:"provider,omitempty"`
+	CreditBalance    *float64 `json:"creditBalance,omitempty"`
 
 	// AuthState: "ok" | "needs_login" | "network_error" | "init"
 	// "needs_login" は claude.ai の Cookie が無い／失効で、
@@ -147,21 +150,45 @@ func updateUsageError(state, msg string) {
 func startCollector() {
 	usageMu.Lock()
 	cachedUsage.AuthState = "init"
+	cachedUsage.Provider = "claude"
 	usageMu.Unlock()
+	codexUsageMu.Lock()
+	cachedCodexUsage.AuthState = "init"
+	cachedCodexUsage.Provider = "codex"
+	codexUsageMu.Unlock()
 
 	go func() {
+		refreshCodexUsage()
 		ticker := time.NewTicker(usagePollInterval())
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				refreshUsage()
+				refreshAllUsage()
 			case <-usageIntervalReset:
 				// 設定保存で間隔が変わったら新しい値で張り直す。
 				ticker.Reset(usagePollInterval())
 			}
 		}
 	}()
+}
+
+// refreshAllUsage は Claude WebView と Codex HTTP の取得を並行実行する。
+func refreshAllUsage() {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); refreshUsage() }()
+	go func() { defer wg.Done(); refreshCodexUsage() }()
+	wg.Wait()
+}
+
+type AllUsageSnapshots struct {
+	Claude UsageSnapshot `json:"claude"`
+	Codex  UsageSnapshot `json:"codex"`
+}
+
+func getAllUsageSnapshots() AllUsageSnapshots {
+	return AllUsageSnapshots{Claude: getUsageSnapshot(), Codex: getCodexUsageSnapshot()}
 }
 
 func getUsageSnapshot() UsageSnapshot {

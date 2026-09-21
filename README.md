@@ -1,11 +1,14 @@
-# Claude Monitor
+# Claude / Codex Monitor
 
-Claude Code（サブスクリプションプラン）のトークン使用量を claude.ai から直接取得して常時モニタする Windows デスクトップウィジェット。
+Claude Code と OpenAI Codex（サブスクリプションプラン）の使用量を、1つの画面で切り替えて常時モニタする Windows デスクトップウィジェット。
 
-- **5時間セッション / 7日** の 2 ウィンドウを claude.ai から取得して表示
+- Claude / Codex のタブを1つのアプリ内で切り替え
+- 設定から、コンパクトな**タブ表示**とClaude/Codexを左右に並べる**1画面表示**を選択可能
+- **短期枠（通常5時間）/ 長期枠（通常7日）** の使用率とリセット時刻を表示
+- Claude は claude.ai、Codex は Codex CLI の `~/.codex/auth.json` を読み取り専用で参照して取得
 - **システムトレイアイコン**が 5h 使用率を数字で、7d 使用率を背景色（緑 / 橙 / 赤）で表示
 - 各ウィンドウの**次回リセット時刻**までのカウントダウンを表示
-- フレームレスで常に最前面に置ける省スペース設計（230 × 210 px）
+- フレームレスで常に最前面に置ける省スペース設計（230 × 320 px）
 - 5 時間使用量の閾値到達 / claude.com Status の障害を **Windows バルーン通知** で知らせる（v0.7.0〜）
 - 補助 WebView2 が claude.ai の Cookie を保持するので、初回のみアプリ内でログインすれば以降は自動で再認証されます
 
@@ -16,7 +19,8 @@ Windows 用のビルド済みバイナリは [Releases](https://github.com/Shuhe
 ## 前提
 
 1. Windows 10 / 11 + WebView2 ランタイム（最新の Microsoft Edge が入っていれば同梱されています）
-2. claude.ai のアカウント
+2. claude.ai のアカウント（Claude監視を使う場合）
+3. Codex CLI でログイン済みであること（Codex監視を使う場合。未ログインなら `codex login`）
 
 初回起動時はウィジェットに **「未ログイン」** バナーが表示されます。バナーの「ログイン」ボタンまたはトレイ右クリックメニューの「Claude にログイン…」を押すとアプリ内に claude.ai のログイン画面が開くのでサインインしてください。Cookie は `%LOCALAPPDATA%\ClaudeMonitor\AuthWebView2\` に保持され、次回以降は自動で再認証されます。
 
@@ -25,9 +29,10 @@ Windows 用のビルド済みバイナリは [Releases](https://github.com/Shuhe
 ## 使い方
 
 1. `ClaudeMonitor.exe` を起動すると右下に半透明ウィジェットが表示されます
-2. 通知領域（タスクトレイ）にアイコンが常駐します
-3. 設定（⚙）で最前面・半透明・通知 ON/OFF を切替
-4. 閉じる（✕）で**タスクトレイにしまう**、終了はトレイアイコンの右クリック → 終了
+2. 画面上部の **Claude / Codex** タブで監視対象を切り替えます。設定の「表示レイアウト」で両方を並べる1画面表示にも変更できます
+3. 通知領域（タスクトレイ）にアイコンが常駐します
+4. 設定（⚙）で最前面・半透明・通知 ON/OFF を切替
+5. 閉じる（✕）で**タスクトレイにしまう**、終了はトレイアイコンの右クリック → 終了
 
 ### タスクトレイアイコンの見かた
 
@@ -42,7 +47,7 @@ Windows 用のビルド済みバイナリは [Releases](https://github.com/Shuhe
 ### 操作
 
 - **✕**: ウィジェットをトレイへしまう
-- **⚙**: 設定画面（最前面 / 半透明 / 通知）
+- **⚙**: 設定画面（表示レイアウト / 最前面 / 半透明 / 通知）
 - **⟳**: 手動で使用量を再取得
 - **トレイ左クリック**: ウィジェットを再表示
 - **トレイ右クリック**: メニュー（バージョン / 著作権 / 表示 / 更新 / Claude にログイン… / 終了）
@@ -51,6 +56,14 @@ Windows 用のビルド済みバイナリは [Releases](https://github.com/Shuhe
 ## 仕組み
 
 ### データソース
+
+Codex は Codex CLI と共有する認証情報を読み取り専用で参照し、次の使用量APIから短期・長期ウィンドウ、プラン、クレジット残高を取得します。認証ファイルの更新やトークンの書き換えは行いません。
+
+```
+GET https://chatgpt.com/backend-api/wham/usage
+```
+
+Codexの障害情報は `status.openai.com` の Codex Web / Codex in ChatGPT Desktop / CLI を監視します。
 
 [jjsmackay/claude-usage-vscode](https://github.com/jjsmackay/claude-usage-vscode) と同じアプローチで、claude.ai の Web セッションを補助 WebView2 で抱え、内部 API に直接問い合わせます。
 
@@ -76,7 +89,7 @@ Cookie が無効・期限切れの場合は使用率取得が `401` / `403` で�
 設定でオンにすると、以下のタイミングで Windows のトースト通知（バルーン）を出します。設定パネルの「通知」セクションで個別に ON / OFF できます（既定オン）。
 
 - **5 時間使用量** が **60% / 80%** を超えたとき（同セッション内では各 1 回。`five_hour.resets_at` の変化でフラグがリセット）
-- **status.claude.com** で新規インシデントを検出したとき（`impact` に応じて NIIF_INFO / NIIF_WARNING / NIIF_ERROR）
+- **status.claude.com / status.openai.com** で対象サービスの新規インシデントを検出したとき（`impact` に応じて NIIF_INFO / NIIF_WARNING / NIIF_ERROR）
 
 起動直後の最初のスナップショットは基準値として保持し通知抑制するため、再起動時に過去の閾値到達やインシデントが再通知されることはありません。
 
@@ -127,7 +140,7 @@ go test ./...
 - [go-webview2](https://github.com/jchv/go-webview2)（WebView2 ラッパー）— UI 用 + claude.ai 用補助の 2 つを生成
 - Win32 API 直叩き（Shell_NotifyIcon / SetLayeredWindowAttributes / Monitor API / CreateIconIndirect / SetWindowLong）
 - 注入 JS から `Bind` 経由で取得結果を Go へ受け渡し（claude.ai/usage と app_start を `fetch`）
-- 標準 `net/http` で `status.claude.com/api/v2/summary.json` をポーリング
+- 標準 `net/http` で Claude / OpenAI の使用量・Status API をポーリング
 - `golang.org/x/image` でトレイアイコンの動的描画
 
 ## ライセンス

@@ -9,7 +9,7 @@ const htmlTemplate = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude モニター</title>
+<title>Claude / Codex モニター</title>
 <style>
   :root {
     --bg-grad: linear-gradient(135deg, #0a0a0d 0%, #15161c 100%);
@@ -76,6 +76,109 @@ const htmlTemplate = `<!DOCTYPE html>
     gap: 5px;
     overflow: hidden;
   }
+
+  .provider-tabs {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .provider-tab {
+    flex: 1;
+    height: 22px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--card);
+    color: var(--fg-dim);
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+  }
+  .provider-tab.active {
+    color: var(--fg);
+    border-color: rgba(139,158,255,0.55);
+    background: rgba(139,158,255,0.16);
+  }
+
+  .overview-view {
+    flex-direction: row;
+    gap: 6px;
+  }
+  .provider-card {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 5px;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+  }
+  .provider-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 18px;
+    gap: 5px;
+  }
+  .provider-card-name { font-size: 11px; font-weight: 700; }
+  .provider-card-plan {
+    min-width: 0;
+    color: var(--fg-dim);
+    font-size: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .overview-message {
+    display: none;
+    flex-shrink: 0;
+    padding: 3px 5px;
+    border-radius: 3px;
+    font-size: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .overview-message.show { display: block; }
+  .overview-message.auth { color: #fca5a5; background: var(--err-bg); }
+  .overview-message.incident { color: #fcd34d; background: rgba(250,204,21,0.10); }
+  .overview-window {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 48px;
+    padding: 4px 6px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .overview-window .row-label { width: 34px; }
+  .overview-extra {
+    display: none;
+    min-height: 31px;
+    padding: 4px 6px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 9px;
+    color: var(--fg-dim);
+  }
+  .overview-extra.show { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+  .overview-extra strong { color: var(--fg); font-size: 10px; }
+  .overview-status { margin-top: auto; }
+  .overview-status .status-tile { height: 24px; padding: 0 2px; font-size: 9px; }
+  .overview-links { display: flex; justify-content: center; gap: 12px; font-size: 9px; }
+  .overview-account {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    color: var(--fg-dim);
+    font-size: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .overview-account span { overflow: hidden; text-overflow: ellipsis; }
 
   .row-bar {
     flex: 1;
@@ -363,7 +466,7 @@ const htmlTemplate = `<!DOCTYPE html>
 </head>
 <body>
   <div class="titlebar" id="titlebar">
-    <div class="title" id="title-text">Claude モニター</div>
+    <div class="title" id="title-text">Claude / Codex モニター</div>
     <div class="title-actions">
       <button class="title-btn" id="btn-refresh" title="更新">⟳</button>
       <button class="title-btn" id="btn-settings" title="設定">⚙</button>
@@ -372,13 +475,17 @@ const htmlTemplate = `<!DOCTYPE html>
   </div>
 
   <div class="content" id="main-view">
+    <div class="provider-tabs">
+      <button class="provider-tab active" id="provider-claude" type="button">Claude</button>
+      <button class="provider-tab" id="provider-codex" type="button">Codex</button>
+    </div>
     <div class="auth-banner" id="auth-banner">
       <strong id="auth-banner-title">認証エラー</strong>
       <div id="auth-banner-body"></div>
       <button id="auth-banner-action" type="button" style="display:none;">ログイン</button>
     </div>
 
-    <div class="status-banner" id="status-banner" title="status.claude.com を開く">
+    <div class="status-banner" id="status-banner" title="サービスステータスを開く">
       <div class="sb-title" id="status-banner-title"></div>
       <div class="sb-sub">
         <span id="status-banner-impact"></span>
@@ -388,7 +495,7 @@ const htmlTemplate = `<!DOCTYPE html>
 
     <div class="row-bar">
       <div class="row-top">
-        <span class="row-label">5時間</span>
+        <span class="row-label" id="label-5h">5時間</span>
         <div class="bar"><div class="bar-fill" id="bar-5h" style="width:0%"></div></div>
         <span class="bar-pct" id="pct-5h">—</span>
       </div>
@@ -397,7 +504,7 @@ const htmlTemplate = `<!DOCTYPE html>
 
     <div class="row-bar">
       <div class="row-top">
-        <span class="row-label">7日</span>
+        <span class="row-label" id="label-7d">7日</span>
         <div class="bar"><div class="bar-fill" id="bar-7d" style="width:0%"></div></div>
         <span class="bar-pct" id="pct-7d">—</span>
       </div>
@@ -419,15 +526,15 @@ const htmlTemplate = `<!DOCTYPE html>
     </div>
 
     <div class="status-row">
-      <div class="status-tile" id="status-claude-ai">
+      <div class="status-tile" id="status-svc-0">
         <span class="status-dot"></span>
         <span class="status-name">claude.ai</span>
       </div>
-      <div class="status-tile" id="status-claude-cowork">
+      <div class="status-tile" id="status-svc-1">
         <span class="status-dot"></span>
         <span class="status-name">Cowork</span>
       </div>
-      <div class="status-tile" id="status-claude-code">
+      <div class="status-tile" id="status-svc-2">
         <span class="status-dot"></span>
         <span class="status-name">Code</span>
       </div>
@@ -441,6 +548,31 @@ const htmlTemplate = `<!DOCTYPE html>
     <div class="footer">
       <span id="account-label"></span>
       <span id="updated">未更新</span>
+    </div>
+  </div>
+
+  <div class="content overview-view hidden" id="overview-view">
+    <div class="provider-card" data-provider="claude">
+      <div class="provider-card-header"><span class="provider-card-name">Claude</span><span class="provider-card-plan" id="ov-claude-plan"></span></div>
+      <div class="overview-message auth" id="ov-claude-auth"></div>
+      <div class="overview-message incident" id="ov-claude-incident"></div>
+      <div class="overview-window"><div class="row-top"><span class="row-label" id="ov-claude-label-5h">5時間</span><div class="bar"><div class="bar-fill" id="ov-claude-bar-5h"></div></div><span class="bar-pct" id="ov-claude-pct-5h">—</span></div><div class="bar-reset" id="ov-claude-reset-5h"></div></div>
+      <div class="overview-window"><div class="row-top"><span class="row-label" id="ov-claude-label-7d">7日</span><div class="bar"><div class="bar-fill" id="ov-claude-bar-7d"></div></div><span class="bar-pct" id="ov-claude-pct-7d">—</span></div><div class="bar-reset" id="ov-claude-reset-7d"></div></div>
+      <div class="overview-extra" id="ov-claude-extra"><span id="ov-claude-extra-label"></span><strong id="ov-claude-extra-value"></strong></div>
+      <div class="status-row overview-status" id="ov-claude-status"></div>
+      <div class="overview-links"><span class="detail-link overview-usage-link" data-provider="claude">使用量 →</span><span class="detail-link overview-status-link" data-provider="claude">Status →</span></div>
+      <div class="overview-account"><span id="ov-claude-account"></span><span id="ov-claude-updated">未更新</span></div>
+    </div>
+    <div class="provider-card" data-provider="codex">
+      <div class="provider-card-header"><span class="provider-card-name">Codex</span><span class="provider-card-plan" id="ov-codex-plan"></span></div>
+      <div class="overview-message auth" id="ov-codex-auth"></div>
+      <div class="overview-message incident" id="ov-codex-incident"></div>
+      <div class="overview-window"><div class="row-top"><span class="row-label" id="ov-codex-label-5h">5時間</span><div class="bar"><div class="bar-fill" id="ov-codex-bar-5h"></div></div><span class="bar-pct" id="ov-codex-pct-5h">—</span></div><div class="bar-reset" id="ov-codex-reset-5h"></div></div>
+      <div class="overview-window"><div class="row-top"><span class="row-label" id="ov-codex-label-7d">7日</span><div class="bar"><div class="bar-fill" id="ov-codex-bar-7d"></div></div><span class="bar-pct" id="ov-codex-pct-7d">—</span></div><div class="bar-reset" id="ov-codex-reset-7d"></div></div>
+      <div class="overview-extra" id="ov-codex-extra"><span id="ov-codex-extra-label"></span><strong id="ov-codex-extra-value"></strong></div>
+      <div class="status-row overview-status" id="ov-codex-status"></div>
+      <div class="overview-links"><span class="detail-link overview-usage-link" data-provider="codex">使用量 →</span><span class="detail-link overview-status-link" data-provider="codex">Status →</span></div>
+      <div class="overview-account"><span id="ov-codex-account"></span><span id="ov-codex-updated">未更新</span></div>
     </div>
   </div>
 
@@ -458,10 +590,16 @@ const htmlTemplate = `<!DOCTYPE html>
       </div>
 
       <div class="group">
+        <div class="group-title">表示レイアウト</div>
+        <label><input type="radio" name="layout-mode" value="tabs" id="layout-tabs"> タブで切り替え</label>
+        <label><input type="radio" name="layout-mode" value="overview" id="layout-overview"> 1画面に並べて表示</label>
+      </div>
+
+      <div class="group">
         <div class="group-title">通知</div>
-        <label><input type="checkbox" id="notify-usage"> 5時間使用量 60% / 80%</label>
+        <label><input type="checkbox" id="notify-usage"> 使用量 60% / 80%</label>
         <label><input type="checkbox" id="notify-overage"> 追加使用量 60% / 80%</label>
-        <label><input type="checkbox" id="notify-status"> Claude Status 障害検知</label>
+        <label><input type="checkbox" id="notify-status"> Claude / OpenAI Status 障害検知</label>
       </div>
 
       <div class="group">
@@ -552,6 +690,8 @@ function applyWindow(prefix, win) {
   const pctEl = document.getElementById('pct-' + prefix);
   const barEl = document.getElementById('bar-' + prefix);
   const resetEl = document.getElementById('reset-' + prefix);
+	const labelEl = document.getElementById('label-' + prefix);
+	labelEl.textContent = (win && win.label) || (prefix === '5h' ? '5時間' : '7日');
   if (!win || typeof win.utilization !== 'number' || (win.utilization === 0 && !win.resetsAt)) {
     pctEl.textContent = '—';
     barEl.style.width = '0%';
@@ -578,8 +718,19 @@ function formatResetDate(iso) {
   return '↻ ' + (t.getMonth() + 1) + '月' + t.getDate() + '日';
 }
 
-function applyOverage(overage) {
+function applyOverage(overage, creditBalance) {
   const section = document.getElementById('overage-section');
+  if (typeof creditBalance === 'number') {
+    section.style.display = '';
+    document.getElementById('overage-bar').style.display = 'none';
+    const amtEl = document.getElementById('overage-amount');
+    amtEl.style.flex = '1';
+    amtEl.style.textAlign = 'left';
+    amtEl.textContent = 'クレジット残高';
+    document.getElementById('overage-limit').textContent = '$' + creditBalance.toFixed(2);
+    document.getElementById('overage-reset').textContent = '';
+    return;
+  }
   if (!overage || typeof overage.amountUsed !== 'number') {
     section.style.display = 'none';
     return;
@@ -623,7 +774,105 @@ function applyOverage(overage) {
 let lastUpdated = null;
 let lastSnapshot = null;
 let lastStatusSnap = null;
+let allUsageSnapshots = null;
+let allStatusSnapshots = null;
+let activeProvider = 'claude';
+let layoutMode = 'tabs';
 let resetTimeFormat = 'datetime';
+
+function overviewId(provider, suffix) {
+  return document.getElementById('ov-' + provider + '-' + suffix);
+}
+
+function renderOverviewWindow(provider, slot, win) {
+  const label = overviewId(provider, 'label-' + slot);
+  const pctEl = overviewId(provider, 'pct-' + slot);
+  const bar = overviewId(provider, 'bar-' + slot);
+  const reset = overviewId(provider, 'reset-' + slot);
+  label.textContent = (win && win.label) || (slot === '5h' ? '5時間' : '7日');
+  if (!win || typeof win.utilization !== 'number' || (win.utilization === 0 && !win.resetsAt)) {
+    pctEl.textContent = '—';
+    bar.style.width = '0%';
+    bar.className = 'bar-fill';
+    reset.textContent = '';
+    return;
+  }
+  const pct = Math.max(0, Math.min(100, Math.round(win.utilization)));
+  pctEl.textContent = pct + '%';
+  bar.style.width = pct + '%';
+  bar.className = 'bar-fill' + (pct >= 81 ? ' crit' : pct >= 61 ? ' warn' : '');
+  reset.textContent = (slot === '5h' && resetTimeFormat === 'relative')
+    ? formatResetRelative(win.resetsAt)
+    : formatResetDateTime(win.resetsAt);
+}
+
+function renderOverviewStatus(provider, services) {
+  const row = overviewId(provider, 'status');
+  row.replaceChildren();
+  for (let i = 0; i < 3; i++) {
+    const svc = services && services[i];
+    const tile = document.createElement('div');
+    tile.className = 'status-tile' + (svc && svc.status && svc.status !== 'unknown' ? ' ' + svc.status : '');
+    const dot = document.createElement('span');
+    dot.className = 'status-dot';
+    const name = document.createElement('span');
+    name.className = 'status-name';
+    name.textContent = svc ? svc.name.replace('Codex in ChatGPT Desktop', 'Desktop').replace('Codex Web', 'Web').replace('Claude ', '') : '—';
+    tile.append(dot, name);
+    row.appendChild(tile);
+  }
+}
+
+function renderOverviewProvider(provider) {
+  const snap = (allUsageSnapshots && allUsageSnapshots[provider]) || {};
+  const status = (allStatusSnapshots && allStatusSnapshots[provider]) || {};
+  overviewId(provider, 'plan').textContent = snap.subscriptionType || '';
+  const account = snap.displayName || snap.email || '';
+  overviewId(provider, 'account').textContent = account || '未ログイン';
+  overviewId(provider, 'updated').textContent = snap.updatedAt ? formatRelative(snap.updatedAt) : '未更新';
+  renderOverviewWindow(provider, '5h', snap.fiveHour);
+  renderOverviewWindow(provider, '7d', snap.sevenDay);
+
+  const auth = overviewId(provider, 'auth');
+  auth.classList.remove('show');
+  if (snap.authState && snap.authState !== 'ok') {
+    auth.textContent = snap.authState === 'needs_login' ? '未ログイン' : snap.authState === 'init' ? '取得中…' : '取得失敗';
+    auth.title = snap.lastError || '';
+    auth.classList.add('show');
+  }
+
+  const extra = overviewId(provider, 'extra');
+  extra.classList.remove('show');
+  if (typeof snap.creditBalance === 'number') {
+    overviewId(provider, 'extra-label').textContent = 'クレジット残高';
+    overviewId(provider, 'extra-value').textContent = '$' + snap.creditBalance.toFixed(2);
+    extra.classList.add('show');
+  } else if (snap.overage && typeof snap.overage.amountUsed === 'number') {
+    overviewId(provider, 'extra-label').textContent = '追加使用量';
+    overviewId(provider, 'extra-value').textContent = snap.overage.spendingLimit > 0
+      ? '$' + snap.overage.amountUsed.toFixed(2) + ' / $' + snap.overage.spendingLimit.toFixed(2)
+      : '$' + snap.overage.amountUsed.toFixed(2);
+    extra.classList.add('show');
+  }
+
+  const incident = overviewId(provider, 'incident');
+  incident.classList.remove('show');
+  const incidents = status.incidents || [];
+  if (snap.authState === 'ok' && incidents.length) {
+    const weight = {critical:4, major:3, minor:2, maintenance:1, none:0};
+    let head = incidents[0];
+    for (const item of incidents) if ((weight[item.impact] || 0) > (weight[head.impact] || 0)) head = item;
+    incident.textContent = head.name || '進行中のインシデント';
+    incident.title = incident.textContent;
+    incident.classList.add('show');
+  }
+  renderOverviewStatus(provider, status.services);
+}
+
+function renderOverview() {
+  renderOverviewProvider('claude');
+  renderOverviewProvider('codex');
+}
 
 function renderAuthBanner(snap) {
   const banner = document.getElementById('auth-banner');
@@ -639,8 +888,12 @@ function renderAuthBanner(snap) {
   switch (snap.authState) {
     case 'needs_login':
       titleEl.textContent = '未ログイン';
-      bodyEl.textContent = 'Claude にサインインしてください。';
-      btn.style.display = 'inline-block';
+	  if (activeProvider === 'codex') {
+	    bodyEl.textContent = 'Codex CLI で codex login を実行してください。';
+	  } else {
+	    bodyEl.textContent = 'Claude にサインインしてください。';
+	    btn.style.display = 'inline-block';
+	  }
       break;
     case 'network_error':
       titleEl.textContent = '取得失敗';
@@ -678,7 +931,7 @@ function applySnapshot(snap) {
   lastSnapshot = snap;
   applyWindow('5h', snap.fiveHour);
   applyWindow('7d', snap.sevenDay);
-  applyOverage(snap.overage);
+  applyOverage(snap.overage, snap.creditBalance);
   renderAuthBanner(snap);
   renderAccount(snap);
   lastUpdated = snap.updatedAt;
@@ -693,7 +946,9 @@ function applySnapshot(snap) {
 async function fetchUsage() {
   try {
     const res = await fetch('/api/usage');
-    applySnapshot(await res.json());
+	allUsageSnapshots = await res.json();
+	applySnapshot(allUsageSnapshots[activeProvider] || {});
+	renderOverview();
   } catch (e) {
     document.getElementById('updated').textContent = '取得エラー';
   }
@@ -702,32 +957,27 @@ async function fetchUsage() {
 function updateFooter() {
   if (lastUpdated) {
     document.getElementById('updated').textContent = formatRelative(lastUpdated);
+  } else {
+    document.getElementById('updated').textContent = '未更新';
   }
   if (lastSnapshot) {
     applyWindow('5h', lastSnapshot.fiveHour);
     applyWindow('7d', lastSnapshot.sevenDay);
   }
+	renderOverview();
 }
 
-// ステータスタイル ID マッピング
-const STATUS_TILE_IDS = {
-  'claude.ai':     'status-claude-ai',
-  'Claude Code':   'status-claude-code',
-  'Claude Cowork': 'status-claude-cowork',
-};
-
 function renderStatusTiles(services) {
-  if (!services) return;
-  for (const svc of services) {
-    const id = STATUS_TILE_IDS[svc.name];
-    if (!id) continue;
-    const tile = document.getElementById(id);
+	for (let i = 0; i < 3; i++) {
+	const tile = document.getElementById('status-svc-' + i);
     if (!tile) continue;
+	const svc = services && services[i];
+	tile.querySelector('.status-name').textContent = svc ? svc.name.replace('Codex in ChatGPT Desktop', 'Desktop').replace('Codex Web', 'Web') : '—';
     // Remove all status classes then apply new one
     tile.classList.remove(
       'operational','degraded_performance','partial_outage','major_outage','under_maintenance'
     );
-    if (svc.status && svc.status !== 'unknown') {
+	if (svc && svc.status && svc.status !== 'unknown') {
       tile.classList.add(svc.status);
     }
   }
@@ -774,13 +1024,34 @@ function renderStatusBanner(snap) {
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');
-    lastStatusSnap = await res.json();
+	allStatusSnapshots = await res.json();
+	lastStatusSnap = allStatusSnapshots[activeProvider] || {};
     renderStatusTiles(lastStatusSnap.services);
     renderStatusBanner(lastStatusSnap);
+	renderOverview();
   } catch (e) {
     // silently fail — tiles stay gray (unknown)
   }
 }
+
+async function switchProvider(provider, persist = true) {
+	if (provider !== 'claude' && provider !== 'codex') return;
+	activeProvider = provider;
+	document.getElementById('provider-claude').classList.toggle('active', provider === 'claude');
+	document.getElementById('provider-codex').classList.toggle('active', provider === 'codex');
+	if (allUsageSnapshots) applySnapshot(allUsageSnapshots[provider] || {});
+	if (allStatusSnapshots) {
+	  lastStatusSnap = allStatusSnapshots[provider] || {};
+	  renderStatusTiles(lastStatusSnap.services);
+	  renderStatusBanner(lastStatusSnap);
+	}
+	if (persist) {
+	  try { await fetch('/api/provider', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider})}); } catch(e) {}
+	}
+}
+
+document.getElementById('provider-claude').addEventListener('click', () => switchProvider('claude'));
+document.getElementById('provider-codex').addEventListener('click', () => switchProvider('codex'));
 
 // --- タイトルバーのボタン ---
 document.getElementById('btn-close').addEventListener('click', () => {
@@ -803,23 +1074,42 @@ document.getElementById('btn-refresh').addEventListener('click', async () => {
 });
 document.getElementById('detail-link').addEventListener('click', (e) => {
   e.preventDefault();
-  fetch('/api/open-usage');
+  fetch('/api/open-usage?provider=' + activeProvider);
 });
 document.getElementById('status-link').addEventListener('click', (e) => {
   e.preventDefault();
-  fetch('/api/open-status');
+  fetch('/api/open-status?provider=' + activeProvider);
 });
 document.getElementById('status-banner').addEventListener('click', () => {
-  fetch('/api/open-status');
+  fetch('/api/open-status?provider=' + activeProvider);
 });
+document.querySelectorAll('.overview-usage-link').forEach(el => el.addEventListener('click', () => {
+  fetch('/api/open-usage?provider=' + el.dataset.provider);
+}));
+document.querySelectorAll('.overview-status-link').forEach(el => el.addEventListener('click', () => {
+  fetch('/api/open-status?provider=' + el.dataset.provider);
+}));
 
 // --- 設定パネル ---
 const mainView = document.getElementById('main-view');
+const overviewView = document.getElementById('overview-view');
 const settingsView = document.getElementById('settings-view');
+
+function applyLayoutModeUI(mode) {
+  layoutMode = mode === 'overview' ? 'overview' : 'tabs';
+  if (settingsView.classList.contains('active')) return;
+  mainView.classList.toggle('hidden', layoutMode !== 'tabs');
+  overviewView.classList.toggle('hidden', layoutMode !== 'overview');
+  if (layoutMode === 'overview') renderOverview();
+}
 
 async function openSettings() {
   const res = await fetch('/api/settings');
   const s = await res.json();
+	await switchProvider(s.activeProvider || activeProvider, false);
+	const lm = s.layoutMode === 'overview' ? 'overview' : 'tabs';
+	document.getElementById('layout-tabs').checked = lm === 'tabs';
+	document.getElementById('layout-overview').checked = lm === 'overview';
   document.getElementById('topmost').checked = !!s.topmost;
   document.getElementById('transparent').checked = !!s.transparent;
   document.getElementById('notify-usage').checked = !!s.notifyUsage;
@@ -839,11 +1129,12 @@ async function openSettings() {
   document.getElementById('poll-usage').value = s.usagePollSeconds || 300;
   document.getElementById('poll-status').value = s.statusPollSeconds || 300;
   mainView.classList.add('hidden');
+	overviewView.classList.add('hidden');
   settingsView.classList.add('active');
 }
 function closeSettings() {
   settingsView.classList.remove('active');
-  mainView.classList.remove('hidden');
+	applyLayoutModeUI(layoutMode);
 }
 document.getElementById('btn-settings').addEventListener('click', openSettings);
 document.getElementById('btn-cancel').addEventListener('click', closeSettings);
@@ -861,6 +1152,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     notifyUsage: document.getElementById('notify-usage').checked,
     notifyOverage: document.getElementById('notify-overage').checked,
     notifyStatus: document.getElementById('notify-status').checked,
+	layoutMode: document.querySelector('input[name="layout-mode"]:checked')?.value || 'tabs',
     overageTipFormat: document.querySelector('input[name="overage-tip-fmt"]:checked')?.value || 'dollar',
     resetTimeFormat: document.querySelector('input[name="reset-time-fmt"]:checked')?.value || 'datetime',
     traySplitDays: parseInt(document.querySelector('input[name="tray-split"]:checked')?.value ?? '7', 10),
@@ -878,6 +1170,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     applied = await res.json();
   } catch (e) {}
   resetTimeFormat = applied.resetTimeFormat === 'relative' ? 'relative' : 'datetime';
+	applyLayoutModeUI(applied.layoutMode);
   startStatusPolling(applied.statusPollSeconds || 300);
   closeSettings();
   fetchUsage();
@@ -921,6 +1214,8 @@ async function initStatusPolling() {
     const s = await (await fetch('/api/settings')).json();
     if (s.statusPollSeconds) sec = s.statusPollSeconds;
     resetTimeFormat = s.resetTimeFormat === 'relative' ? 'relative' : 'datetime';
+	await switchProvider(s.activeProvider || 'claude', false);
+	applyLayoutModeUI(s.layoutMode);
   } catch (e) {}
   startStatusPolling(sec);
 }

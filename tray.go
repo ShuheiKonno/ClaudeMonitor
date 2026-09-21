@@ -247,7 +247,7 @@ func trayWndProc(hwnd, msg uintptr, wParam, lParam uintptr) uintptr {
 			showMainWindow()
 		case IDM_REFRESH:
 			go func() {
-				refreshUsage()
+				refreshAllUsage()
 				updateTrayFromSnapshot()
 			}()
 		case IDM_REAUTH:
@@ -339,13 +339,11 @@ func showTrayMenu(hwnd uintptr) {
 	procAppendMenuW.Call(menu, MF_STRING, IDM_REFRESH, uintptr(unsafe.Pointer(refreshPtr)))
 	procAppendMenuW.Call(menu, MF_STRING, IDM_TEST_NOTIFY, uintptr(unsafe.Pointer(testNotifyPtr)))
 	procAppendMenuW.Call(menu, MF_SEPARATOR, 0, 0)
-	usageMu.Lock()
-	authState := cachedUsage.AuthState
-	usageMu.Unlock()
-	if authState == "ok" {
+	cfg := snapshotConfig()
+	if cfg.ActiveProvider == "claude" && getUsageSnapshot().AuthState == "ok" {
 		logoutPtr, _ := syscall.UTF16PtrFromString("ログアウト")
 		procAppendMenuW.Call(menu, MF_STRING, IDM_LOGOUT, uintptr(unsafe.Pointer(logoutPtr)))
-	} else {
+	} else if cfg.ActiveProvider == "claude" {
 		reauthPtr, _ := syscall.UTF16PtrFromString("Claude にログイン…")
 		procAppendMenuW.Call(menu, MF_STRING, IDM_REAUTH, uintptr(unsafe.Pointer(reauthPtr)))
 	}
@@ -410,7 +408,13 @@ func clampPct(v float64) int {
 }
 
 func updateTrayFromSnapshot() {
+	cfg := snapshotConfig()
 	snap := getUsageSnapshot()
+	providerLabel := "Claude"
+	if cfg.ActiveProvider == "codex" {
+		snap = getCodexUsageSnapshot()
+		providerLabel = "Codex"
+	}
 	if snap.AuthState != "ok" {
 		hIcon := generateErrorTrayIcon()
 		if hIcon == 0 {
@@ -419,7 +423,6 @@ func updateTrayFromSnapshot() {
 		setTrayIcon(hIcon, trayTooltipForError(snap))
 		return
 	}
-	cfg := snapshotConfig()
 	pct5h := clampPct(snap.FiveHour.Utilization)
 	pct7d := clampPct(snap.SevenDay.Utilization)
 	yellow, red := trayPaceThresholds(snap.SevenDay.ResetsAt, time.Now(), cfg.TraySplitDays)
@@ -428,7 +431,18 @@ func updateTrayFromSnapshot() {
 	if hIcon == 0 {
 		return
 	}
-	tip := fmt.Sprintf("Claude モニター\n5h: %d%% / 7d: %d%%", pct5h, pct7d)
+	shortLabel := snap.FiveHour.Label
+	longLabel := snap.SevenDay.Label
+	if shortLabel == "" {
+		shortLabel = "短期"
+	}
+	if longLabel == "" {
+		longLabel = "長期"
+	}
+	tip := fmt.Sprintf("%s モニター\n%s: %d%% / %s: %d%%", providerLabel, shortLabel, pct5h, longLabel, pct7d)
+	if snap.CreditBalance != nil {
+		tip += fmt.Sprintf(" / Credit: $%.2f", *snap.CreditBalance)
+	}
 	if ov := snap.Overage; ov != nil && (ov.AmountUsed > 0 || ov.SpendingLimit != nil) {
 		// cfg は既に上で取得済みなのでここで再度 snapshotConfig() を呼ばない
 		var ovStr string
@@ -447,15 +461,22 @@ func updateTrayFromSnapshot() {
 }
 
 func trayTooltipForError(snap UsageSnapshot) string {
+	name := "Claude"
+	if snap.Provider == "codex" {
+		name = "Codex"
+	}
 	switch snap.AuthState {
 	case "needs_login":
-		return "Claude モニター — 未ログイン\n右クリック → ログイン"
+		if snap.Provider == "codex" {
+			return "Codex モニター — 未ログイン\ncodex login を実行してください"
+		}
+		return name + " モニター — 未ログイン\n右クリック → ログイン"
 	case "network_error":
-		return "Claude モニター — 取得失敗\n" + truncateString(snap.LastError, 80)
+		return name + " モニター — 取得失敗\n" + truncateString(snap.LastError, 80)
 	case "init":
-		return "Claude モニター — 取得中…"
+		return name + " モニター — 取得中…"
 	}
-	return "Claude モニター — エラー"
+	return name + " モニター — エラー"
 }
 
 func truncateString(s string, n int) string {
@@ -749,7 +770,7 @@ func addTrayIcon() {
 	if trayAdded {
 		return
 	}
-	applyTrayIconLocked(generateTrayIcon(0, 0), "Claude モニター")
+	applyTrayIconLocked(generateTrayIcon(0, 0), "Claude / Codex モニター")
 }
 
 // readdTrayIcon は通知領域からアイコンが消えた場合に登録をやり直す。

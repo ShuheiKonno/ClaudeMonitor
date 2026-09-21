@@ -40,6 +40,29 @@ func TestNormalizeResetTimeFormat(t *testing.T) {
 	}
 }
 
+func TestNormalizeLayoutMode(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", "tabs"},
+		{"tabs", "tabs"},
+		{"overview", "overview"},
+		{"invalid", "tabs"},
+	}
+	for _, c := range cases {
+		if got := normalizeLayoutMode(c.in); got != c.want {
+			t.Errorf("normalizeLayoutMode(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestWindowSizeForLayout(t *testing.T) {
+	if w, h := windowSizeForLayout("tabs"); w != tabWindowWidth || h != windowHeight {
+		t.Fatalf("tabs size = %dx%d", w, h)
+	}
+	if w, h := windowSizeForLayout("overview"); w != overviewWindowWidth || h != windowHeight {
+		t.Fatalf("overview size = %dx%d", w, h)
+	}
+}
+
 // TestPollIntervalsNeverZero は config が 0/範囲外でも間隔が常に正であることを保証する。
 // time.NewTicker / Ticker.Reset は間隔 <= 0 で panic するため、この不変条件が重要。
 func TestPollIntervalsNeverZero(t *testing.T) {
